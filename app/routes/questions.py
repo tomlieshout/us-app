@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
-from app.models import Favourite, Question
+from app.models import ActivityContent, Favourite, Question
 from app.services.privacy import spicy_unlocked
 from app.services.questions import get_or_create_round_for_question
 
@@ -56,7 +56,18 @@ def list_questions():
     favourite_ids = {
         f.question_id for f in Favourite.query.filter_by(user_id=current_user.id).all()
     }
-    played_ids = {r.question_id for r in current_user.couple.rounds}
+    # "Already played" now reflects Activity history rather than legacy
+    # Round history: since the previous phase migrated every existing
+    # Round into an Activity 1:1, and new plays only ever create
+    # Activities going forward (see app/routes/activities.py), Activity
+    # history alone is the complete picture - checking Round here too
+    # would only ever add duplicates, never anything new.
+    played_content_ids = {a.content_id for a in current_user.couple.activities.all()}
+    played_question_ids = {
+        c.payload.get("legacy_question_id")
+        for c in ActivityContent.query.filter(ActivityContent.id.in_(played_content_ids)).all()
+        if c.payload.get("legacy_question_id") is not None
+    }
 
     return jsonify(
         {
@@ -64,7 +75,7 @@ def list_questions():
                 {
                     **q.to_dict(),
                     "is_favourite": q.id in favourite_ids,
-                    "already_played": q.id in played_ids,
+                    "already_played": q.id in played_question_ids,
                 }
                 for q in questions
             ]

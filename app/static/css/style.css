@@ -762,6 +762,67 @@ img { max-width: 100%; display: block; }
 
 .scale-option-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 
+/* ------------------------------------------------------------------ Games */
+
+.game-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+}
+.game-tile .game-emoji {
+  width: 52px; height: 52px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+.game-tile .game-name { font-family: var(--font-heading); font-weight: 600; font-size: 16.5px; }
+.game-tile .game-desc { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+
+.wyr-prompt { font-family: var(--font-heading); font-size: 17px; text-align: center; color: var(--text-muted); margin-bottom: 4px; }
+.wyr-options { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.wyr-option-card {
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 22px 18px;
+  text-align: center;
+  transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.wyr-option-card:active { transform: scale(0.98); }
+.wyr-option-card .wyr-emoji { font-size: 34px; display: block; margin-bottom: 8px; }
+.wyr-option-card .wyr-text { font-weight: 700; font-size: 16px; line-height: 1.35; }
+.wyr-option-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+.wyr-option-card.chosen-by-partner { border-color: var(--border-strong); }
+.wyr-option-card .wyr-pickers { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+
+.wyr-divider {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-faint);
+  letter-spacing: 0.1em;
+  margin: 2px 0;
+}
+
+.wyr-result-banner {
+  text-align: center;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  margin-top: 16px;
+  font-size: 15px;
+}
+.wyr-result-banner.match { background: var(--success-soft); color: var(--success); }
+.wyr-result-banner.no-match { background: var(--border); color: var(--text-muted); }
+
 /* --------------------------------------------------------------- Utility */
 
 .flex-row { display: flex; align-items: center; }

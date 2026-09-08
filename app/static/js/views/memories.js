@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { escapeHtml, showToast, categoryEmoji, formatRelativeDate } from '../utils.js';
 import { isSpicyUnlocked } from '../state.js';
-import { openRoundModal } from './round.js';
+import { openActivityModal } from './round.js';
 
 const FILTERS = [
   { key: '', label: 'All' },
@@ -54,14 +54,14 @@ export async function renderMemories(container) {
     }
     let data;
     try {
-      data = await api.history(page, activeFilter || undefined);
+      data = await api.activities.history(page, activeFilter || undefined);
     } catch (err) {
       showToast(err.message);
       return;
     }
     if (reset) list.innerHTML = '';
 
-    if (data.rounds.length === 0 && page === 1) {
+    if (data.activities.length === 0 && page === 1) {
       list.innerHTML = `
         <div class="empty-state">
           <div class="empty-emoji">💭</div>
@@ -73,7 +73,7 @@ export async function renderMemories(container) {
       return;
     }
 
-    data.rounds.forEach((r) => list.appendChild(memoryCard(r)));
+    data.activities.forEach((a) => list.appendChild(memoryCard(a)));
     moreBtn.classList.toggle('hidden', !data.has_more);
   }
 
@@ -82,23 +82,24 @@ export async function renderMemories(container) {
   load(true);
 }
 
-function memoryCard(round) {
+function memoryCard(activity) {
   const card = document.createElement('button');
   card.className = 'card card-tap';
   card.style.display = 'block';
   card.style.width = '100%';
   card.style.textAlign = 'left';
-  const preview = round.my_answer && !round.my_answer.is_private
-    ? truncate(round.my_answer.text ?? round.my_answer.option, 60)
+  const submission = activity.my_submission;
+  const preview = submission && !submission.is_private
+    ? truncate(submission.payload.answer_text ?? submission.payload.answer_option, 60)
     : null;
   card.innerHTML = `
     <div class="status-row" style="margin-bottom:6px;">
-      <span class="chip chip-muted">${categoryEmoji(round.question.category)} ${formatRelativeDate(round.created_at)}</span>
+      <span class="chip chip-muted">${categoryEmoji(activity.content.category)} ${formatRelativeDate(activity.created_at)}</span>
     </div>
-    <p style="font-weight:600;font-size:15px;line-height:1.4;">${escapeHtml(round.question.text)}</p>
+    <p style="font-weight:600;font-size:15px;line-height:1.4;">${escapeHtml(activity.content.prompt)}</p>
     ${preview ? `<p class="text-muted small mt-8">"${escapeHtml(preview)}"</p>` : ''}
   `;
-  card.addEventListener('click', () => openRoundModal(round.round_id));
+  card.addEventListener('click', () => openActivityModal(activity.activity_id));
   return card;
 }
 

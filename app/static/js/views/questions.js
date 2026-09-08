@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeHtml, showToast, openModal } from '../utils.js';
-import { openRoundModal } from './round.js';
+import { openActivityModal } from './round.js';
 
 export async function renderQuestions(container) {
   await renderCategoryGrid(container);
@@ -94,6 +94,11 @@ async function renderQuestionList(container, cat) {
     matchesBtn.textContent = '🔥 Find Your Matches';
     matchesBtn.addEventListener('click', showSpicyMatches);
     container.appendChild(matchesBtn);
+    const caption = document.createElement('p');
+    caption.className = 'text-muted small mt-8';
+    caption.style.textAlign = 'center';
+    caption.textContent = "Reflects Spicy questions answered so far - matching for questions played just now is being connected up next.";
+    container.appendChild(caption);
   }
 
   const listCard = document.createElement('div');
@@ -114,8 +119,8 @@ async function renderQuestionList(container, cat) {
       `;
       item.querySelector('.q-tap').addEventListener('click', async () => {
         try {
-          const round = await api.playQuestion(q.id);
-          openRoundModal(round.round_id);
+          const activity = await api.activities.play(q.id);
+          openActivityModal(activity.activity_id);
         } catch (err) {
           showToast(err.message);
         }

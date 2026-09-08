@@ -3,6 +3,7 @@ import { escapeHtml, initials, applyTheme } from './utils.js';
 import { state, setAuth } from './state.js';
 import { renderOnboarding } from './views/onboarding.js';
 import { renderHome } from './views/home.js';
+import { renderGames } from './views/games.js';
 import { renderQuestions } from './views/questions.js';
 import { renderMemories } from './views/memories.js';
 import { renderStats } from './views/stats.js';
@@ -10,6 +11,7 @@ import { renderSettings } from './views/settings.js';
 
 const VIEWS = {
   home: renderHome,
+  games: renderGames,
   questions: renderQuestions,
   memories: renderMemories,
   stats: renderStats,

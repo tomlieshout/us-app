@@ -40,10 +40,14 @@ def create_app(config_name=None):
 
 
 def _register_blueprints(app):
+    from app.routes.activities import activities_bp
     from app.routes.answers import answers_bp
+    from app.routes.appreciation import appreciation_bp
     from app.routes.auth import auth_bp
+    from app.routes.challenges import challenges_bp
     from app.routes.comments import comments_bp
     from app.routes.couple import couple_bp
+    from app.routes.emoji_story import emoji_story_bp
     from app.routes.favourites import favourites_bp
     from app.routes.pages import pages_bp
     from app.routes.questions import questions_bp
@@ -52,6 +56,7 @@ def _register_blueprints(app):
     from app.routes.settings import settings_bp
     from app.routes.spicy import spicy_bp
     from app.routes.stats import stats_bp
+    from app.routes.twenty_questions import twenty_questions_bp
 
     app.register_blueprint(pages_bp)
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -65,6 +70,11 @@ def _register_blueprints(app):
     app.register_blueprint(stats_bp, url_prefix="/api/stats")
     app.register_blueprint(settings_bp, url_prefix="/api/settings")
     app.register_blueprint(spicy_bp, url_prefix="/api/spicy")
+    app.register_blueprint(activities_bp, url_prefix="/api/activities")
+    app.register_blueprint(emoji_story_bp, url_prefix="/api/emoji-story")
+    app.register_blueprint(twenty_questions_bp, url_prefix="/api/twenty-questions")
+    app.register_blueprint(challenges_bp, url_prefix="/api/challenges")
+    app.register_blueprint(appreciation_bp, url_prefix="/api/appreciation")
 
 
 def _register_error_handlers(app):
@@ -109,6 +119,31 @@ def _register_error_handlers(app):
         # Deliberately identical to a plain 404: a request for data outside
         # the current user's couple should look indistinguishable from a
         # request for something that doesn't exist at all.
+        return not_found(e)
+
+    from app.services.activity_privacy import ActivityAccessDenied
+
+    @app.errorhandler(ActivityAccessDenied)
+    def activity_access_denied(e):
+        # Same rule, same reasoning, for the new Activity system.
+        return not_found(e)
+
+    from app.services.twenty_questions import TwentyQuestionsAccessDenied
+
+    @app.errorhandler(TwentyQuestionsAccessDenied)
+    def twenty_questions_access_denied(e):
+        return not_found(e)
+
+    from app.services.challenges import ChallengeAccessDenied
+
+    @app.errorhandler(ChallengeAccessDenied)
+    def challenge_access_denied(e):
+        return not_found(e)
+
+    from app.services.appreciation import AppreciationAccessDenied
+
+    @app.errorhandler(AppreciationAccessDenied)
+    def appreciation_access_denied(e):
         return not_found(e)
 
     from flask_wtf.csrf import CSRFError

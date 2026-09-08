@@ -72,7 +72,8 @@ export const api = {
   questions: (category) => request('GET', `/api/questions${category ? `?category=${encodeURIComponent(category)}` : ''}`),
   playQuestion: (id) => request('POST', `/api/questions/${id}/play`),
 
-  // Rounds
+  // Rounds (legacy engine - kept for rollback safety; the live UI now
+  // uses `activities` below instead. Routes are untouched and still work.)
   currentRound: () => request('GET', '/api/rounds/current'),
   randomRound: (category) => request('GET', `/api/rounds/random${category ? `?category=${encodeURIComponent(category)}` : ''}`),
   round: (id) => request('GET', `/api/rounds/${id}`),
@@ -82,8 +83,29 @@ export const api = {
     return request('GET', `/api/rounds/history?${params.toString()}`);
   },
 
-  // Answers
+  // Answers (legacy engine - see note above)
   submitAnswer: (data) => request('POST', '/api/answers', data),
+
+  // Activities - the live engine for the question/answer experience as of
+  // the architectural-integration phase. See app/routes/activities.py.
+  activities: {
+    current: () => request('GET', '/api/activities/current'),
+    random: ({ category, activity_type } = {}) => {
+      const params = new URLSearchParams();
+      if (category) params.set('category', category);
+      if (activity_type) params.set('activity_type', activity_type);
+      const qs = params.toString();
+      return request('GET', `/api/activities/random${qs ? `?${qs}` : ''}`);
+    },
+    play: (legacyQuestionId) => request('POST', `/api/activities/play/${legacyQuestionId}`),
+    get: (id) => request('GET', `/api/activities/${id}`),
+    submit: (id, data) => request('POST', `/api/activities/${id}/submit`, data),
+    history: (page, category) => {
+      const params = new URLSearchParams({ page: page || 1 });
+      if (category) params.set('category', category);
+      return request('GET', `/api/activities/history?${params.toString()}`);
+    },
+  },
 
   // Reactions / comments
   addReaction: (answerId, reactionType) => request('POST', '/api/reactions', { answer_id: answerId, reaction_type: reactionType }),
@@ -109,6 +131,44 @@ export const api = {
   // Spicy
   spicyMatches: () => request('GET', '/api/spicy/matches'),
   deleteSpicyRound: (roundId) => request('POST', `/api/spicy/rounds/${roundId}/delete`),
+
+  // Emoji Story
+  emojiStory: {
+    create: (emoji_sequence, explanation) => request('POST', '/api/emoji-story/create', { emoji_sequence, explanation }),
+    mine: () => request('GET', '/api/emoji-story/mine'),
+    guess: () => request('POST', '/api/emoji-story/guess'),
+  },
+
+  // 20 Questions
+  twentyQuestions: {
+    current: () => request('GET', '/api/twenty-questions/current'),
+    get: (id) => request('GET', `/api/twenty-questions/${id}`),
+    create: (category, secret_text) => request('POST', '/api/twenty-questions/create', { category, secret_text }),
+    ask: (id, question_text, is_guess) => request('POST', `/api/twenty-questions/${id}/ask`, { question_text, is_guess }),
+    answer: (id, answer) => request('POST', `/api/twenty-questions/${id}/answer`, { answer }),
+    abandon: (id) => request('POST', `/api/twenty-questions/${id}/abandon`),
+  },
+
+  // Challenges
+  challenges: {
+    random: (category) => request('GET', `/api/challenges/random${category ? `?category=${encodeURIComponent(category)}` : ''}`),
+    accept: (content_id) => request('POST', '/api/challenges/accept', { content_id }),
+    mine: (status) => request('GET', `/api/challenges/mine${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+    complete: (id) => request('POST', `/api/challenges/${id}/complete`),
+  },
+
+  // Appreciation
+  appreciation: {
+    send: (message_text) => request('POST', '/api/appreciation/send', { message_text }),
+    received: (unseenOnly) => request('GET', `/api/appreciation/received${unseenOnly ? '?unseen_only=true' : ''}`),
+    sent: () => request('GET', '/api/appreciation/sent'),
+    unseenCount: () => request('GET', '/api/appreciation/unseen-count'),
+    markSeen: (id) => request('POST', `/api/appreciation/${id}/seen`),
+    react: (id, reaction_type) => request('POST', `/api/appreciation/${id}/react`, { reaction_type }),
+    removeReaction: (id) => request('DELETE', `/api/appreciation/${id}/react`),
+    keep: (id) => request('POST', `/api/appreciation/${id}/keep`),
+    remove: (id) => request('POST', `/api/appreciation/${id}/delete`),
+  },
 };
 
 export { ApiError };
