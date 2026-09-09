@@ -36,34 +36,8 @@ def test_prediction_scoring_correct_and_incorrect(app, couple):
     assert tom_view["prediction"]["i_guessed_correctly"] is True
 
 
-def test_prediction_percent_hidden_until_minimum_rounds(app, couple):
-    tom, sarah = couple["tom"], couple["sarah"]
-
-    stats = tom.get("/api/stats").get_json()
-    assert stats["prediction"]["percent"] is None
-    assert stats["prediction"]["enough_data"] is False
-
-    # MIN_ROUNDS_FOR_PREDICTION_PERCENT defaults to 5 in TestingConfig's base
-    for i in range(5):
-        with app.app_context():
-            q = Question.query.filter_by(question_type="prediction").offset(i).first()
-        _play_one_more_prediction(app, tom, sarah, q)
-
-    stats = tom.get("/api/stats").get_json()
-    assert stats["prediction"]["enough_data"] is True
-    assert isinstance(stats["prediction"]["percent"], int)
-
-
-def _play_one_more_prediction(app, tom, sarah, question):
-    with app.app_context():
-        from app.models import Couple
-
-        couple_row = Couple.query.first()
-        r = Round(couple_id=couple_row.id, question_id=question.id)
-        db.session.add(r)
-        db.session.commit()
-        round_id = r.id
-        opts = question.options
-
-    tom.post("/api/answers", json={"round_id": round_id, "answer_option": opts[0], "predicted_option": opts[1]})
-    sarah.post("/api/answers", json={"round_id": round_id, "answer_option": opts[1], "predicted_option": opts[0]})
+# Prediction-percent gating (min rounds before a % is shown) is now covered
+# in tests/test_stats.py, against the new Activity-based Stats page — this
+# legacy-engine round/answer flow no longer feeds /api/stats (see
+# app/static/js/api.js's own "legacy engine" comment: the live UI has moved
+# to the Activity system, and the new Stats endpoint was ported to match).
