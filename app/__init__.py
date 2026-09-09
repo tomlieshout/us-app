@@ -49,6 +49,7 @@ def _register_blueprints(app):
     from app.routes.couple import couple_bp
     from app.routes.emoji_story import emoji_story_bp
     from app.routes.favourites import favourites_bp
+    from app.routes.memories import memories_bp
     from app.routes.pages import pages_bp
     from app.routes.questions import questions_bp
     from app.routes.reactions import reactions_bp
@@ -75,6 +76,7 @@ def _register_blueprints(app):
     app.register_blueprint(twenty_questions_bp, url_prefix="/api/twenty-questions")
     app.register_blueprint(challenges_bp, url_prefix="/api/challenges")
     app.register_blueprint(appreciation_bp, url_prefix="/api/appreciation")
+    app.register_blueprint(memories_bp, url_prefix="/api/memories")
 
 
 def _register_error_handlers(app):

@@ -6,6 +6,7 @@ import { renderHome } from './views/home.js';
 import { renderGames } from './views/games.js';
 import { renderQuestions } from './views/questions.js';
 import { renderMemories } from './views/memories.js';
+import { renderHistory } from './views/history.js';
 import { renderStats } from './views/stats.js';
 import { renderSettings } from './views/settings.js';
 
@@ -14,6 +15,7 @@ const VIEWS = {
   games: renderGames,
   questions: renderQuestions,
   memories: renderMemories,
+  history: renderHistory,
   stats: renderStats,
   settings: renderSettings,
 };

@@ -169,6 +169,15 @@ export const api = {
     keep: (id) => request('POST', `/api/appreciation/${id}/keep`),
     remove: (id) => request('POST', `/api/appreciation/${id}/delete`),
   },
+
+  // Memories
+  memories: {
+    list: () => request('GET', '/api/memories'),
+    get: (id) => request('GET', `/api/memories/${id}`),
+    create: (data) => request('POST', '/api/memories', data),
+    update: (id, data) => request('PATCH', `/api/memories/${id}`, data),
+    remove: (id) => request('DELETE', `/api/memories/${id}`),
+  },
 };
 
 export { ApiError };

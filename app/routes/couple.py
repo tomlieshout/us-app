@@ -48,8 +48,9 @@ def update_couple():
 @login_required
 def delete_couple():
     """Permanently deletes the couple and everything tied to it (rounds,
-    answers, reactions, comments, favourites, both accounts). Requires the
-    user to type the confirmation phrase DELETE, per the build brief."""
+    answers, reactions, comments, favourites, memories, both accounts).
+    Requires the user to type the confirmation phrase DELETE, per the build
+    brief."""
     from app.models import Couple, User
 
     data = request.get_json(silent=True) or {}
@@ -60,11 +61,13 @@ def delete_couple():
     couple_id = couple.id
 
     # Answers/reactions/comments cascade via the Round relationship;
-    # Favourites reference users directly so clean those up explicitly.
-    from app.models import Favourite
+    # Favourites and Memories reference users/couples directly so clean
+    # those up explicitly.
+    from app.models import Favourite, Memory
 
     user_ids = [u.id for u in couple.ordered_members()]
     Favourite.query.filter(Favourite.user_id.in_(user_ids)).delete(synchronize_session=False)
+    Memory.query.filter_by(couple_id=couple_id).delete(synchronize_session=False)
 
     for round_ in couple.rounds.all():
         db.session.delete(round_)
