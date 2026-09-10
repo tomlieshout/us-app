@@ -345,7 +345,7 @@ img { max-width: 100%; display: block; }
   color: var(--text-muted);
   margin-bottom: 6px;
 }
-.field input, .field textarea {
+.field input, .field textarea, .field select {
   width: 100%;
   background: var(--surface);
   border: 1.5px solid var(--border-strong);
@@ -353,8 +353,10 @@ img { max-width: 100%; display: block; }
   padding: 13px 14px;
   color: var(--text);
   transition: border-color 0.15s ease;
+  font-family: var(--font-body);
+  font-size: 15px;
 }
-.field input:focus, .field textarea:focus, .field input:focus-visible {
+.field input:focus, .field textarea:focus, .field select:focus, .field input:focus-visible {
   outline: none;
   border-color: var(--accent);
 }
@@ -585,6 +587,32 @@ img { max-width: 100%; display: block; }
 .question-list-item .qmeta { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; }
 .fav-btn { background: none; border: none; font-size: 19px; padding: 4px; flex-shrink: 0; color: var(--text-faint); }
 .fav-btn.active { color: var(--accent); }
+
+.plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.plan-item:last-child { border-bottom: none; }
+.plan-item.is-done .plan-title { color: var(--text-faint); text-decoration: line-through; }
+.plan-check {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  color: transparent;
+  margin-top: 1px;
+}
+.plan-check.checked { background: var(--success); border-color: var(--success); color: #fff; }
+.plan-item .plan-body { flex: 1; min-width: 0; }
+.plan-title { font-size: 15px; font-weight: 600; line-height: 1.35; }
+.plan-notes { font-size: 13px; color: var(--text-muted); margin-top: 3px; line-height: 1.4; }
+.plan-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 5px; }
 
 /* --------------------------------------------------------------- Round UI */
 

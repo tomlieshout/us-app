@@ -178,6 +178,18 @@ export const api = {
     update: (id, data) => request('PATCH', `/api/memories/${id}`, data),
     remove: (id) => request('DELETE', `/api/memories/${id}`),
   },
+  plans: {
+    categories: () => request('GET', '/api/plans/categories'),
+    statuses: () => request('GET', '/api/plans/statuses'),
+    list: (params = {}) => {
+      const qs = new URLSearchParams(params).toString();
+      return request('GET', `/api/plans${qs ? `?${qs}` : ''}`);
+    },
+    get: (id) => request('GET', `/api/plans/${id}`),
+    create: (data) => request('POST', '/api/plans', data),
+    update: (id, data) => request('PATCH', `/api/plans/${id}`, data),
+    remove: (id) => request('DELETE', `/api/plans/${id}`),
+  },
 };
 
 export { ApiError };

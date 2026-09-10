@@ -11,6 +11,7 @@ from app.models.twenty_questions import TwentyQuestionsGame, TwentyQuestionsTurn
 from app.models.challenge import CoupleChallenge
 from app.models.appreciation import Appreciation
 from app.models.memory import Memory
+from app.models.plan import Plan
 
 __all__ = [
     "Couple",
@@ -32,4 +33,5 @@ __all__ = [
     "CoupleChallenge",
     "Appreciation",
     "Memory",
+    "Plan",
 ]
