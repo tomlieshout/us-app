@@ -30,6 +30,13 @@ def pick_content_for_couple(couple, activity_type="classic_question", category=N
     activity. Mirrors services.questions.pick_question_for_couple exactly,
     against the new tables.
 
+    Spicy content policy: while locked, Spicy is fully excluded from any
+    unfiltered pool (daily question, general random) - the same as every
+    other route that touches Spicy content. Once both partners have
+    unlocked it, Spicy behaves as a normal category and is eligible for
+    that same unfiltered pool like anything else - no special-casing once
+    unlocked.
+
     exclude_created_by_user_id: for user-generated content (Emoji Story's
     partner-created stories), never serve someone their own creation to
     guess. This is a Python-side filter (payload is JSON, not a queryable
@@ -39,7 +46,7 @@ def pick_content_for_couple(couple, activity_type="classic_question", category=N
         if category == "spicy" and not spicy_unlocked_flag:
             return None
         query = query.filter_by(category=category)
-    else:
+    elif not spicy_unlocked_flag:
         # NULL-safe: category != "spicy" alone would, per standard SQL
         # NULL semantics, also exclude every row with category IS NULL
         # (e.g. know_each_other content, which has no category at all) -
@@ -48,6 +55,9 @@ def pick_content_for_couple(couple, activity_type="classic_question", category=N
         query = query.filter(
             db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy")
         )
+    # else: spicy_unlocked_flag is True and no specific category was
+    # requested - no extra filtering. Spicy content is eligible for the
+    # general/daily pool exactly like every other category once unlocked.
 
     candidates = query.all()
     if exclude_created_by_user_id is not None:

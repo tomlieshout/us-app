@@ -8,6 +8,13 @@ phase). The legacy routes are untouched and still fully functional -
 Reactions, Comments, Spicy match-aggregation, and Stats still read the
 legacy tables and have not been ported to the new engine yet (flagged as
 a follow-up, not silently dropped).
+
+Spicy visibility policy, enforced consistently across every route below:
+while locked (spicy_unlocked() is False for the couple), Spicy content is
+treated as if it does not exist anywhere - not served as new content, not
+included in "All" history, and not directly viewable/submittable even via
+a specific activity_id the user already has. Once both partners unlock it,
+Spicy behaves as a normal category with no special-casing.
 """
 
 from flask import Blueprint, jsonify, request
@@ -27,6 +34,13 @@ from app.services.privacy import spicy_unlocked
 activities_bp = Blueprint("activities", __name__)
 
 
+def _is_hidden_spicy(activity):
+    """True if this activity's content is Spicy and the couple currently
+    has Spicy locked - i.e. it should be treated as if it doesn't exist,
+    regardless of whether it was created/answered while unlocked."""
+    return activity.content.category == "spicy" and not spicy_unlocked(activity.couple)
+
+
 @activities_bp.get("/current")
 @login_required
 def current_activity():
@@ -34,6 +48,11 @@ def current_activity():
     GET /api/rounds/current."""
     activity = get_or_create_daily_activity(current_user.couple, spicy_unlocked_flag=spicy_unlocked(current_user.couple))
     if activity is None:
+        return jsonify({"error": "no_content", "message": "No content is available right now."}), 404
+    if _is_hidden_spicy(activity):
+        # Rare edge case: today's daily was selected earlier while Spicy
+        # was unlocked, then someone disabled it later the same day. Treat
+        # it the same as "nothing available" rather than exposing it.
         return jsonify({"error": "no_content", "message": "No content is available right now."}), 404
     return jsonify(serialize_activity(activity, current_user))
 
@@ -83,8 +102,15 @@ def play_legacy_question(question_id):
 @activities_bp.get("/history")
 @login_required
 def activity_history():
-    """Memories page - the Activity-system counterpart to
-    GET /api/rounds/history."""
+    """Memories/History page - the Activity-system counterpart to
+    GET /api/rounds/history.
+
+    Spicy is fully hidden from the "All" view while locked - not just
+    gated from new access, but excluded from a couple's own past history
+    too, per the module-level Spicy visibility policy. Once unlocked,
+    Spicy behaves as a normal category and is included in "All" like
+    everything else. Explicitly requesting the "spicy" filter still
+    requires spicy_unlocked()."""
     from app.models import Activity
 
     page = max(int(request.args.get("page", 1)), 1)
@@ -96,10 +122,11 @@ def activity_history():
         if category == "spicy" and not spicy_unlocked(current_user.couple):
             return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
         query = query.join(ActivityContent).filter(ActivityContent.category == category)
-    else:
+    elif not spicy_unlocked(current_user.couple):
         query = query.join(ActivityContent).filter(
             db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy")
         )
+    # else: unlocked and no category filter - include everything, Spicy included.
 
     total = query.count()
     activities = (
@@ -124,6 +151,12 @@ def get_activity(activity_id):
         activity = get_owned_activity(activity_id, current_user)
     except ActivityAccessDenied:
         return jsonify({"error": "not_found", "message": "That couldn't be found."}), 404
+    if _is_hidden_spicy(activity):
+        # Same rule as everywhere else: while locked, treat a Spicy
+        # activity as if it doesn't exist, even via a direct ID the user
+        # already has (e.g. a bookmarked link, or a history entry loaded
+        # just before Spicy was disabled).
+        return jsonify({"error": "not_found", "message": "That couldn't be found."}), 404
     return jsonify(serialize_activity(activity, current_user))
 
 
@@ -133,6 +166,9 @@ def submit_activity(activity_id):
     try:
         activity = get_owned_activity(activity_id, current_user)
     except ActivityAccessDenied:
+        return jsonify({"error": "not_found", "message": "That couldn't be found."}), 404
+
+    if _is_hidden_spicy(activity):
         return jsonify({"error": "not_found", "message": "That couldn't be found."}), 404
 
     data = request.get_json(silent=True) or {}
