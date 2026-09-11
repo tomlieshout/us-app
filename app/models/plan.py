@@ -1,4 +1,7 @@
+import re
 from datetime import datetime
+
+from sqlalchemy.orm import validates
 
 from app.extensions import db
 
@@ -49,6 +52,14 @@ class Plan(db.Model):
     added_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
 
     title = db.Column(db.String(200), nullable=False)
+    # Normalized copy of `title` used for shared-interest matching (Task 4.2)
+    # - trimmed, internal whitespace collapsed, casefolded. Kept in sync via
+    # the @validates hook below so it's impossible to set `title` through
+    # any code path and forget to update this. Deliberately NOT more
+    # aggressive than that (no punctuation stripping, no accent-folding) -
+    # the brief explicitly asks for exact-title matching that tolerates
+    # simple whitespace/capitalization differences, not fuzzy matching.
+    title_key = db.Column(db.String(200), nullable=False, index=True)
     category = db.Column(db.String(32), nullable=False, index=True)
     status = db.Column(db.String(16), nullable=False, default="someday", index=True)
     notes = db.Column(db.Text, nullable=True)
@@ -60,7 +71,16 @@ class Plan(db.Model):
     couple = db.relationship("Couple")
     added_by = db.relationship("User")
 
-    def to_dict(self, viewer=None):
+    @staticmethod
+    def normalize_title(title):
+        return re.sub(r"\s+", " ", (title or "").strip()).casefold()
+
+    @validates("title")
+    def _sync_title_key(self, key, value):
+        self.title_key = self.normalize_title(value)
+        return value
+
+    def to_dict(self, viewer=None, matched=False):
         is_owner = viewer is not None and viewer.id == self.added_by_id
 
         base = {
@@ -72,6 +92,10 @@ class Plan(db.Model):
             "added_by_name": self.added_by.name if self.added_by else None,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            # Always False for a private/redacted item - matching never
+            # considers private plans (see routes/plans.py), so this can
+            # never leak a match against content the viewer can't see.
+            "matched": matched and not (self.is_private and not is_owner),
         }
 
         if self.is_private and not is_owner:

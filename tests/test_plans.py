@@ -241,3 +241,110 @@ def test_cross_couple_access_denied(app, couple):
 def test_get_nonexistent_plan_404s(couple):
     tom = couple["tom"]
     assert tom.get("/api/plans/999999").status_code == 404
+
+
+# --------------------------------------------------- shared-interest matching
+
+def test_exact_match(couple):
+    tom, sarah = couple["tom"], couple["sarah"]
+    tom_plan = _create(tom, title="Japan", category="holidays").get_json()
+    sarah_plan = _create(sarah, title="Japan", category="holidays").get_json()
+
+    # sarah's plan is created after tom's, so her own creation response
+    # already reflects the match; tom's needs a re-fetch to see it, since
+    # his creation response was returned before sarah's plan existed
+    assert sarah_plan["matched"] is True
+    assert tom.get(f"/api/plans/{tom_plan['id']}").get_json()["matched"] is True
+
+    # both partners see the match on both rows via the list endpoint too
+    tom_list = {p["title"]: p["matched"] for p in tom.get("/api/plans").get_json()["plans"]}
+    assert tom_list == {"Japan": True}
+
+
+def test_capitalization_and_whitespace_differences_still_match(couple):
+    tom, sarah = couple["tom"], couple["sarah"]
+    tom_plan = _create(tom, title="  Japan  ", category="holidays").get_json()
+    sarah_plan = _create(sarah, title="JAPAN", category="holidays").get_json()
+    assert sarah_plan["matched"] is True
+    assert tom.get(f"/api/plans/{tom_plan['id']}").get_json()["matched"] is True
+
+    # irregular spacing BETWEEN words (not inside one) should still
+    # collapse to the same key - "New   Zealand" and "New Zealand" are the
+    # same trip; "ja pan" and "Japan" are not the same word and must NOT
+    # be merged (that would be a false positive from over-aggressive
+    # normalization, which the brief explicitly warns against)
+    nz_one = _create(tom, title="New Zealand", category="trips").get_json()
+    nz_two = _create(sarah, title="  New   Zealand ", category="trips").get_json()
+    assert nz_two["matched"] is True
+    assert tom.get(f"/api/plans/{nz_one['id']}").get_json()["matched"] is True
+
+
+def test_inserted_internal_whitespace_is_not_treated_as_a_match(couple):
+    """A space inserted INSIDE a word changes the word - collapsing repeat
+    whitespace must not be confused with removing whitespace entirely."""
+    tom, sarah = couple["tom"], couple["sarah"]
+    _create(tom, title="Japan", category="holidays")
+    sarah_plan = _create(sarah, title="Ja Pan", category="holidays").get_json()
+    assert sarah_plan["matched"] is False
+
+
+def test_different_categories_do_not_match(couple):
+    tom, sarah = couple["tom"], couple["sarah"]
+    tom_plan = _create(tom, title="Japan", category="holidays").get_json()
+    sarah_plan = _create(sarah, title="Japan", category="trips").get_json()
+
+    assert tom_plan["matched"] is False
+    assert sarah_plan["matched"] is False
+
+
+def test_different_titles_do_not_match(couple):
+    tom, sarah = couple["tom"], couple["sarah"]
+    tom_plan = _create(tom, title="Japan", category="holidays").get_json()
+    sarah_plan = _create(sarah, title="Italy", category="holidays").get_json()
+
+    assert tom_plan["matched"] is False
+    assert sarah_plan["matched"] is False
+
+
+def test_duplicate_additions_by_the_same_person_do_not_match(couple):
+    tom = couple["tom"]
+    first = _create(tom, title="Japan", category="holidays").get_json()
+    second = _create(tom, title="Japan", category="holidays").get_json()
+
+    assert first["id"] != second["id"]
+    assert tom.get(f"/api/plans/{first['id']}").get_json()["matched"] is False
+    assert tom.get(f"/api/plans/{second['id']}").get_json()["matched"] is False
+
+    # once sarah genuinely adds it too, both of tom's duplicates flip on,
+    # alongside sarah's - a real cross-partner match, not just a re-count
+    # of tom's own duplicate
+    sarah = couple["sarah"]
+    sarah_plan = _create(sarah, title="Japan", category="holidays").get_json()
+    assert sarah_plan["matched"] is True
+    assert tom.get(f"/api/plans/{first['id']}").get_json()["matched"] is True
+    assert tom.get(f"/api/plans/{second['id']}").get_json()["matched"] is True
+
+
+def test_private_plans_never_match_even_with_identical_title(couple):
+    tom, sarah = couple["tom"], couple["sarah"]
+    tom_plan = _create(tom, title="Japan", category="holidays", is_private=True).get_json()
+    sarah_plan = _create(sarah, title="Japan", category="holidays").get_json()
+
+    # neither side shows a match - if sarah's did, it would tell her tom
+    # has an identical private item, leaking its existence/content
+    assert tom_plan["matched"] is False
+    assert sarah_plan["matched"] is False
+
+    sarah_view_of_toms = sarah.get(f"/api/plans/{tom_plan['id']}").get_json()
+    assert sarah_view_of_toms["matched"] is False
+    assert "title" not in sarah_view_of_toms
+
+
+def test_match_disappears_if_title_edited_away(couple):
+    tom, sarah = couple["tom"], couple["sarah"]
+    tom_plan = _create(tom, title="Japan", category="holidays").get_json()
+    _create(sarah, title="Japan", category="holidays")
+    assert tom.get(f"/api/plans/{tom_plan['id']}").get_json()["matched"] is True
+
+    tom.patch(f"/api/plans/{tom_plan['id']}", json={"title": "South Korea"})
+    assert tom.get(f"/api/plans/{tom_plan['id']}").get_json()["matched"] is False

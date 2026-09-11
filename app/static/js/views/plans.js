@@ -146,6 +146,7 @@ function renderPlanItem(plan, cat, onChange) {
   body.className = 'plan-body';
   body.innerHTML = `
     <div class="plan-title">${escapeHtml(plan.title)}</div>
+    ${plan.matched ? '<div class="plan-match-badge">❤️ YOU BOTH WANT THIS!</div>' : ''}
     ${plan.notes ? `<div class="plan-notes">${escapeHtml(plan.notes)}</div>` : ''}
     <div class="plan-meta">
       ${escapeHtml(plan.added_by_name || '')}${plan.is_private ? ' · 🔒 private' : ''} ·

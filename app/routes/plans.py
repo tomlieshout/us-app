@@ -40,6 +40,42 @@ def _can_mutate(plan, user):
     return True
 
 
+def _matched_plan_ids(couple_id):
+    """Shared-interest matching (Task 4.2): exact title + same category,
+    tolerant of capitalization/whitespace via Plan.title_key.
+
+    Private plans are excluded entirely - both from the group they'd form
+    AND from ever being compared against. If a private plan matched a
+    partner's public one, flagging it would tell the partner "your partner
+    already has something with this exact title" without them ever seeing
+    it - a real leak through the one channel to_dict() otherwise closes off.
+
+    A group only counts as a match once it has plans from >= 2 DISTINCT
+    partners - one person adding the same title twice (the "duplicate
+    additions" case) must never flag as a match.
+    """
+    rows = (
+        Plan.query.filter_by(couple_id=couple_id, is_private=False)
+        .with_entities(Plan.id, Plan.category, Plan.title_key, Plan.added_by_id)
+        .all()
+    )
+
+    groups = {}
+    for plan_id, category, title_key, added_by_id in rows:
+        groups.setdefault((category, title_key), []).append((plan_id, added_by_id))
+
+    matched_ids = set()
+    for members in groups.values():
+        if len({added_by_id for _, added_by_id in members}) >= 2:
+            matched_ids.update(plan_id for plan_id, _ in members)
+    return matched_ids
+
+
+def _serialize(plan, matched_ids=None):
+    matched_ids = matched_ids if matched_ids is not None else _matched_plan_ids(current_user.couple_id)
+    return plan.to_dict(current_user, matched=plan.id in matched_ids)
+
+
 @plans_bp.get("/categories")
 @login_required
 def categories():
@@ -77,7 +113,8 @@ def list_plans():
         query = query.filter_by(status=status)
 
     plans = query.order_by(Plan.created_at.desc()).all()
-    return jsonify({"plans": [p.to_dict(current_user) for p in plans]})
+    matched_ids = _matched_plan_ids(current_user.couple_id)
+    return jsonify({"plans": [_serialize(p, matched_ids) for p in plans]})
 
 
 @plans_bp.get("/<int:plan_id>")
@@ -86,7 +123,7 @@ def get_plan(plan_id):
     plan = _get_owned_plan(plan_id)
     if plan is None:
         return jsonify({"error": "not_found"}), 404
-    return jsonify(plan.to_dict(current_user))
+    return jsonify(_serialize(plan))
 
 
 @plans_bp.post("")
@@ -117,7 +154,7 @@ def create_plan():
     )
     db.session.add(plan)
     db.session.commit()
-    return jsonify(plan.to_dict(current_user)), 201
+    return jsonify(_serialize(plan)), 201
 
 
 @plans_bp.patch("/<int:plan_id>")
@@ -163,7 +200,7 @@ def update_plan(plan_id):
 
     plan.updated_at = datetime.utcnow()
     db.session.commit()
-    return jsonify(plan.to_dict(current_user))
+    return jsonify(_serialize(plan))
 
 
 @plans_bp.delete("/<int:plan_id>")
