@@ -1,8 +1,18 @@
 // "Us" service worker: caches the app shell for offline/instant loads.
 // API responses are NEVER cached - answers are privacy-sensitive and must
 // always come fresh from the server (see build brief section 34).
+//
+// The HTML document itself (`/`) is treated differently from the other
+// shell assets: it embeds a CSRF token tied to the current server-side
+// session at render time. Serving a stale cached copy of it can leave a
+// user stuck with a token that no longer matches their live session -
+// surfacing as "your session expired" on every submit, especially on
+// mobile where session/cookie state resets more readily than desktop.
+// So the HTML page is network-first (always try fresh, fall back to
+// cache only when genuinely offline); everything else stays cache-first
+// for instant loads, since CSS/JS aren't session-sensitive.
 
-const CACHE_NAME = 'us-app-shell-v1';
+const CACHE_NAME = 'us-app-shell-v2';
 const SHELL_ASSETS = [
   '/',
   '/static/css/style.css',
@@ -22,6 +32,7 @@ const SHELL_ASSETS = [
   '/static/js/views/appreciation.js',
   '/static/js/views/questions.js',
   '/static/js/views/memories.js',
+  '/static/js/views/history.js',
   '/static/js/views/stats.js',
   '/static/js/views/settings.js',
   '/static/js/views/round.js',
@@ -52,6 +63,28 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
   if (event.request.method !== 'GET') return;
 
+  // The HTML document (navigation requests, and "/" specifically) always
+  // needs a fresh CSRF token tied to the current session - network-first,
+  // only falling back to the cached shell when there's no connectivity.
+  const isDocumentRequest = event.request.mode === 'navigate' || url.pathname === '/';
+  if (isDocumentRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Everything else (CSS/JS/manifest): cache-first for instant loads,
+  // with a background refresh for next time. Not session-sensitive, so
+  // staleness here doesn't cause the CSRF problem the HTML page can.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const networkFetch = fetch(event.request)
