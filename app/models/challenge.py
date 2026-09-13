@@ -21,7 +21,7 @@ from datetime import datetime
 
 from app.extensions import db
 
-CHALLENGE_CATEGORIES = ["cute", "funny", "deep", "romantic"]
+CHALLENGE_CATEGORIES = ["cute", "funny", "deep", "romantic", "spicy"]
 
 
 class CoupleChallenge(db.Model):

@@ -64,12 +64,23 @@ def _competitive_results(couple):
     """Every competitive ActivityResult for this couple, joined to its
     Activity's content (activity_type + question_type), needed to bucket
     prediction-accuracy / would-you-rather-agreement correctly. One query,
-    reused for every competitive stat below."""
+    reused for every competitive stat below.
+
+    Spicy content is excluded here regardless of current lock state - the
+    Spicy brief explicitly calls out Stats as a place Spicy shouldn't
+    surface unless deliberately designed for it, and folding it into the
+    general points/leader/prediction-accuracy/WYR-agreement numbers would
+    do that by accident (and, worse, make swings in those numbers a
+    second-order signal of Spicy activity even while locked)."""
     return (
         db.session.query(ActivityResult, ActivityContent)
         .join(Activity, ActivityResult.activity_id == Activity.id)
         .join(ActivityContent, Activity.content_id == ActivityContent.id)
-        .filter(Activity.couple_id == couple.id, ActivityResult.is_competitive.is_(True))
+        .filter(
+            Activity.couple_id == couple.id,
+            ActivityResult.is_competitive.is_(True),
+            db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy"),
+        )
         .all()
     )
 
@@ -188,16 +199,32 @@ def compute_competitive_stats(couple, min_for_percent=5):
 def compute_together_stats(user):
     couple = user.couple
 
+    # Spicy excluded here too, same reasoning as _competitive_results above -
+    # "games played"/"questions answered" stay a general Together metric
+    # regardless of Spicy lock state, not one that grows when Spicy content
+    # is played.
     activities = (
         db.session.query(Activity, ActivityContent)
         .join(ActivityContent, Activity.content_id == ActivityContent.id)
-        .filter(Activity.couple_id == couple.id, Activity.revealed_at.isnot(None))
+        .filter(
+            Activity.couple_id == couple.id,
+            Activity.revealed_at.isnot(None),
+            db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy"),
+        )
         .all()
     )
     questions_answered = sum(1 for _, c in activities if c.activity_type == "classic_question")
     activity_games = sum(1 for _, c in activities if c.activity_type != "classic_question")
 
-    challenges_completed = CoupleChallenge.query.filter_by(couple_id=couple.id, status="completed").count()
+    challenges_completed = (
+        CoupleChallenge.query.join(ActivityContent, CoupleChallenge.content_id == ActivityContent.id)
+        .filter(
+            CoupleChallenge.couple_id == couple.id,
+            CoupleChallenge.status == "completed",
+            db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy"),
+        )
+        .count()
+    )
     twenty_q_completed = TwentyQuestionsGame.query.filter(
         TwentyQuestionsGame.couple_id == couple.id, TwentyQuestionsGame.status != "in_progress"
     ).count()

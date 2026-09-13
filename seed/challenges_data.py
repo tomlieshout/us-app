@@ -1,11 +1,14 @@
 """
 The Challenges content bank. Seeded into ActivityContent
-(activity_type="challenge"). No spicy challenges here by explicit
-instruction - that belongs to a later Spicy-specific phase, not this one.
+(activity_type="challenge"). Spicy challenges (category="spicy") were
+deliberately held back until this phase - see app/routes/challenges.py and
+app/services/challenges.py for the dual-consent gating that now covers them
+(hidden entirely while locked, normal - including in /mine - once
+unlocked, same policy as every other Spicy content type in the app).
 
-Each entry: prompt (the challenge text) and requires_both (whether both
-partners need to explicitly confirm completion, or either partner alone
-can mark it done).
+Each entry: prompt (the challenge text), category, and requires_both
+(whether both partners need to explicitly confirm completion, or either
+partner alone can mark it done).
 """
 
 CHALLENGES = []
@@ -56,4 +59,16 @@ CHALLENGES += [
     {"prompt": "Give each other a genuine, uninterrupted 5-minute hug", "category": "romantic", "requires_both": True},
     {"prompt": "Plan your dream trip together, no budget limits", "category": "romantic", "requires_both": True},
     {"prompt": "Write down your favourite thing about your relationship and share it", "category": "romantic", "requires_both": False},
+]
+
+# -------------------------------------------------------------- Spicy 🌶️
+CHALLENGES += [
+    {"prompt": "Each write down one thing you'd like to try in bed, then swap and talk it through", "category": "spicy", "requires_both": True},
+    {"prompt": "Give each other a 10-minute massage that's allowed to lead wherever it leads", "category": "spicy", "requires_both": True},
+    {"prompt": "Wear something for your partner tonight that you've been wanting to but haven't yet", "category": "spicy", "requires_both": False},
+    {"prompt": "Send your partner a message describing exactly what you want to do to them tonight", "category": "spicy", "requires_both": False},
+    {"prompt": "Try a new position together tonight and talk about what you liked afterward", "category": "spicy", "requires_both": True},
+    {"prompt": "Spend 15 minutes exploring each other with a blindfold on, taking turns", "category": "spicy", "requires_both": True},
+    {"prompt": "Pick one thing from your Comfort Scale matches you're both curious about and actually try it this week", "category": "spicy", "requires_both": True},
+    {"prompt": "Take turns being completely in charge for 20 minutes, no questions asked", "category": "spicy", "requires_both": True},
 ]

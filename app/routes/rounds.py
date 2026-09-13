@@ -55,8 +55,11 @@ def history():
         if category == "spicy" and not spicy_unlocked(current_user.couple):
             return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
         query = query.join(Question).filter(Question.category == category)
-    else:
+    elif not spicy_unlocked(current_user.couple):
         query = query.join(Question).filter(Question.category != "spicy")
+    # else: no category filter and Spicy is unlocked - Spicy behaves as a
+    # normal category and is included in "All", same as the Activity
+    # system's history route.
 
     total = query.count()
     rounds = (

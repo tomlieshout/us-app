@@ -48,8 +48,10 @@ def list_questions():
     query = Question.query.filter_by(active=True)
     if category:
         query = query.filter_by(category=category)
-    else:
+    elif not spicy_unlocked(current_user.couple):
         query = query.filter(Question.category != "spicy")
+    # else: no category filter and Spicy is unlocked - Spicy behaves as a
+    # normal category, same as everywhere else in the app.
 
     questions = query.order_by(Question.id.asc()).all()
 

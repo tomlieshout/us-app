@@ -117,3 +117,62 @@ WOULD_YOU_RATHER_QUESTIONS += [
      "option_a": "One big, unforgettable adventure", "emoji_a": "🏔️",
      "option_b": "Many small, quiet ones", "emoji_b": "🌤️"},
 ]
+
+# ------------------------------------------------------------------ Spicy
+# Adults-only, dual opt-in (see app/services/privacy.py: spicy_unlocked).
+# Explicit by design - both partners have already confirmed they're 18+
+# and both opted in before any of this is ever reachable. Gating is
+# automatic: app/routes/activities.py hides any ActivityContent with
+# category="spicy" everywhere while locked, and treats it as a fully
+# normal category (including in unfiltered "All" history) once unlocked -
+# no per-question gating logic needed here.
+WOULD_YOU_RATHER_QUESTIONS += [
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Try anal for the first time together", "emoji_a": "🍑",
+     "option_b": "Try a new toy together for the first time", "emoji_b": "🎛️"},
+    {"prompt": "Would you rather we", "category": "spicy",
+     "option_a": "Use a blindfold during sex", "emoji_a": "🙈",
+     "option_b": "Use light restraints during sex", "emoji_b": "🔗"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Film a private video together, just for us", "emoji_a": "🎥",
+     "option_b": "Take private photos together, just for us", "emoji_b": "📸"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "I take full control in bed", "emoji_a": "😈",
+     "option_b": "You take full control in bed", "emoji_b": "🔥"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Have sex somewhere in the house we've never tried", "emoji_a": "🏠",
+     "option_b": "Have sex somewhere outside the house, discreetly", "emoji_b": "🌙"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Give oral", "emoji_a": "👅",
+     "option_b": "Receive oral", "emoji_b": "💦"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Talk dirty during sex", "emoji_a": "💬",
+     "option_b": "Stay quiet and let the moment speak for itself", "emoji_b": "🤫"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Use a vibrator together", "emoji_a": "🔌",
+     "option_b": "Use massage oil together", "emoji_b": "🧴"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Try a new position tonight", "emoji_a": "🔀",
+     "option_b": "Take it slow with something familiar tonight", "emoji_b": "🐢"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Be tied up", "emoji_a": "🪢",
+     "option_b": "Be the one tying up", "emoji_b": "🎀"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Try light spanking", "emoji_a": "✋",
+     "option_b": "Try leaving hickeys/marks", "emoji_b": "💋"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Act out a roleplay scenario together", "emoji_a": "🎭",
+     "option_b": "Read/watch something together for inspiration first", "emoji_b": "📖"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Have a quickie", "emoji_a": "⚡",
+     "option_b": "Take your time, all night", "emoji_b": "🌌"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Try edging (build up, then hold off) together", "emoji_a": "⏳",
+     "option_b": "Go straight for it, no teasing", "emoji_b": "🎯"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "Shower together first", "emoji_a": "🚿",
+     "option_b": "Skip straight to it", "emoji_b": "🔥"},
+    {"prompt": "Would you rather", "category": "spicy",
+     "option_a": "I initiate tonight", "emoji_a": "😏",
+     "option_b": "You initiate tonight", "emoji_b": "😉"},
+]

@@ -249,8 +249,13 @@ QUESTIONS += [
 # ------------------------------------------------------------------- Spicy 🌶️
 # Optional, disabled by default, requires both partners to opt in
 # independently (see app/routes/settings.py + services/privacy.spicy_unlocked).
-# Kept tasteful and relationship-focused per the brief - none of this is
-# graphic; it's phrased as discussion/comfort-level prompts.
+# Explicit and sex-focused by design once both partners have confirmed
+# they're adults and both opted in - this bank exists so a couple can
+# actually discuss and calibrate real preferences, not just euphemisms.
+# Tier 3 ("Adventurous") deliberately names specific acts/kinks (anal, toys,
+# restraints/bondage, filming, power play, etc. - not an exhaustive list)
+# so structured_scale answers feed a genuinely useful "Find your matches"
+# view rather than staying vague.
 
 # 🌶️ Flirty
 QUESTIONS += [
@@ -320,4 +325,69 @@ QUESTIONS += [
     {"text": "What's a fantasy you're comfortable sharing that we haven't talked about before?", "category": "spicy", "qtype": "free_text", "spicy_level": 3},
     {"text": "Trying a 'surprise' day where one partner plans an intimate experience for the other", "category": "spicy", "qtype": "structured_scale",
      "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Trying anal sex together", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Using a vibrator or other sex toy during sex", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Being tied up with real restraints (rope, cuffs, a tie) during sex", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Being the one doing the tying, with your partner restrained", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Filming or photographing an intimate moment together, just for the two of us", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Trying light spanking or impact play", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Taking on a clearly dominant or submissive role for a scene", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Acting out a specific roleplay scenario (strangers, a fantasy setup, etc.)", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Exploring edging or drawn-out orgasm control together", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Trying temperature play - ice, warm massage oil, etc.", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Sending a sexy photo or message to each other in the middle of the day", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Watching porn or reading erotica together for inspiration", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Mutual masturbation, watching each other", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Trying sex somewhere semi-public but still safe and private (a car, a balcony, etc.)", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "A whole session focused only on oral, no other goal", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "Combining a blindfold with restraints for a fuller sensory scene", "category": "spicy", "qtype": "structured_scale",
+     "spicy_level": 3, "options": INTEREST_SCALE, "match_eligible": True},
+    {"text": "What's a specific fantasy - involving anal, toys, restraints, or anything else - you'd want to explore with me?", "category": "spicy", "qtype": "free_text", "spicy_level": 3},
+    {"text": "Is there something you've seen, read, or watched that turned you on that you'd want to try together?", "category": "spicy", "qtype": "free_text", "spicy_level": 3},
+    {"text": "What's a roleplay scenario or power dynamic you'd fantasize about us acting out?", "category": "spicy", "qtype": "free_text", "spicy_level": 3},
+]
+
+# 🌶️🌶️🌶️ Prediction - guess your partner's real preference, same
+# "prediction" mechanic used elsewhere (services/prediction.py), just with
+# a spicy-tagged, explicit question bank.
+QUESTIONS += [
+    {"text": "Which of these are you most curious to try together?", "category": "spicy", "qtype": "prediction", "spicy_level": 3,
+     "options": ["Anal", "Sex toys", "Bondage or restraints", "Roleplay", "Filming ourselves"],
+     "predict_text": "Which do you think your partner is most curious about?"},
+    {"text": "What's your ideal pace during sex?", "category": "spicy", "qtype": "prediction", "spicy_level": 2,
+     "options": ["Slow and drawn-out", "Fast and intense", "Depends on the mood", "A mix of both"],
+     "predict_text": "What pace do you think your partner prefers?"},
+    {"text": "Which turns you on more?", "category": "spicy", "qtype": "prediction", "spicy_level": 3,
+     "options": ["Being in control", "Giving up control", "Switching between both", "Neither, equal footing"],
+     "predict_text": "Which do you think your partner picked?"},
+    {"text": "What time of day are you most in the mood?", "category": "spicy", "qtype": "prediction", "spicy_level": 1,
+     "options": ["Morning", "Afternoon", "Night", "Whenever it happens"],
+     "predict_text": "When do you think your partner is most in the mood?"},
+    {"text": "Which sounds most appealing right now?", "category": "spicy", "qtype": "prediction", "spicy_level": 2,
+     "options": ["A slow massage that leads somewhere", "Something spontaneous and quick", "A planned date night with a toy or two", "Just cuddling and seeing where it goes"],
+     "predict_text": "What do you think your partner picked?"},
+    {"text": "How do you feel about filming or photographing an intimate moment together?", "category": "spicy", "qtype": "prediction", "spicy_level": 3,
+     "options": ["Into the whole thing", "Just a few photos, nothing more", "Not for me", "Curious but nervous"],
+     "predict_text": "What do you think your partner picked?"},
+    {"text": "What's your favourite way to be touched first?", "category": "spicy", "qtype": "prediction", "spicy_level": 2,
+     "options": ["Neck or shoulders", "Lower back", "Inner thighs", "Somewhere else entirely"],
+     "predict_text": "Where do you think your partner picked?"},
+    {"text": "Which sounds like the most fun date-night twist?", "category": "spicy", "qtype": "prediction", "spicy_level": 3,
+     "options": ["A toy shopping trip together", "A roleplay costume night", "A blindfolded surprise evening", "A no-rules spontaneous night"],
+     "predict_text": "What do you think your partner picked?"},
 ]

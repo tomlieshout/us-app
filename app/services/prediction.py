@@ -11,9 +11,13 @@ def prediction_accuracy(user, min_rounds_for_percent=5):
     if not partner:
         return result
 
+    # category != "spicy" (not just == "know_me") so any future non-spicy
+    # prediction category keeps counting here without another change -
+    # Spicy itself is excluded regardless of lock state, matching
+    # app/services/stats.py's competitive stats for the same reason.
     rounds = (
         couple.rounds.join(Question)
-        .filter(Question.question_type == "prediction")
+        .filter(Question.question_type == "prediction", Question.category != "spicy")
         .all()
     )
 
