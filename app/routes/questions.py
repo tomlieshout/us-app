@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
+from sqlalchemy import func
 
 from app.models import ActivityContent, Favourite, Question
 from app.services.privacy import spicy_unlocked
@@ -53,7 +54,16 @@ def list_questions():
     # else: no category filter and Spicy is unlocked - Spicy behaves as a
     # normal category, same as everywhere else in the app.
 
-    questions = query.order_by(Question.id.asc()).all()
+    # Level 1 before level 2 before level 3. Non-spicy questions have no
+    # spicy_level (None), so coalesce() puts them all in one group of "0" -
+    # this line is a no-op for every other category, only Spicy is
+    # affected. Within a level, func.random() re-shuffles on every single
+    # request (SQLite and Postgres both support RANDOM() natively), so
+    # insertion order - i.e. what order they were seeded in - can never
+    # cause bunching again, regardless of how future questions get added.
+    questions = query.order_by(
+        func.coalesce(Question.spicy_level, 0).asc(), func.random()
+    ).all()
 
     favourite_ids = {
         f.question_id for f in Favourite.query.filter_by(user_id=current_user.id).all()
