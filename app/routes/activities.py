@@ -102,31 +102,44 @@ def play_legacy_question(question_id):
 @activities_bp.get("/history")
 @login_required
 def activity_history():
-    """Memories/History page - the Activity-system counterpart to
-    GET /api/rounds/history.
+    """Memories/History page, AND each game's own "Past Rounds" list (via
+    the new activity_type filter) - both are the same underlying feed of a
+    couple's revealed activities, just scoped differently by the caller.
 
-    Spicy is fully hidden from the "All" view while locked - not just
+    Spicy is fully hidden from the unfiltered view while locked - not just
     gated from new access, but excluded from a couple's own past history
     too, per the module-level Spicy visibility policy. Once unlocked,
-    Spicy behaves as a normal category and is included in "All" like
-    everything else. Explicitly requesting the "spicy" filter still
-    requires spicy_unlocked()."""
+    Spicy behaves as a normal category and is included like everything
+    else. Explicitly requesting the "spicy" category filter still requires
+    spicy_unlocked()."""
     from app.models import Activity
 
     page = max(int(request.args.get("page", 1)), 1)
     per_page = min(int(request.args.get("per_page", 20)), 50)
     category = request.args.get("category")
+    activity_type = request.args.get("activity_type")
 
-    query = current_user.couple.activities.filter(Activity.revealed_at.isnot(None))
+    # Always join ActivityContent - every game's "Past Rounds" list filters
+    # by activity_type, and the History page's category filter needs it
+    # too. A couple's Activity always has exactly one ActivityContent, so
+    # this inner join never duplicates or drops rows for callers that need
+    # neither filter.
+    query = (
+        current_user.couple.activities.filter(Activity.revealed_at.isnot(None)).join(ActivityContent)
+    )
+
     if category:
         if category == "spicy" and not spicy_unlocked(current_user.couple):
             return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
-        query = query.join(ActivityContent).filter(ActivityContent.category == category)
+        query = query.filter(ActivityContent.category == category)
     elif not spicy_unlocked(current_user.couple):
-        query = query.join(ActivityContent).filter(
+        query = query.filter(
             db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy")
         )
     # else: unlocked and no category filter - include everything, Spicy included.
+
+    if activity_type:
+        query = query.filter(ActivityContent.activity_type == activity_type)
 
     total = query.count()
     activities = (

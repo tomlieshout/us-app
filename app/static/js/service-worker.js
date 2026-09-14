@@ -36,6 +36,7 @@ const SHELL_ASSETS = [
   '/static/js/views/stats.js',
   '/static/js/views/settings.js',
   '/static/js/views/round.js',
+  '/static/js/views/game_history.js',
   '/static/manifest.json',
 ];
 

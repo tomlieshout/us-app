@@ -100,9 +100,10 @@ export const api = {
     play: (legacyQuestionId) => request('POST', `/api/activities/play/${legacyQuestionId}`),
     get: (id) => request('GET', `/api/activities/${id}`),
     submit: (id, data) => request('POST', `/api/activities/${id}/submit`, data),
-    history: (page, category) => {
+    history: (page, category, activity_type) => {
       const params = new URLSearchParams({ page: page || 1 });
       if (category) params.set('category', category);
+      if (activity_type) params.set('activity_type', activity_type);
       return request('GET', `/api/activities/history?${params.toString()}`);
     },
   },

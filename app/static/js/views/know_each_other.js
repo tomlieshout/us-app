@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { escapeHtml, openModal, showToast } from '../utils.js';
 import { meMember, partnerMember } from '../state.js';
+import { renderPastRoundsList } from './game_history.js';
 
 /** Opens the Know Each Other sheet: fetch a random activity, answer for
  * yourself AND predict your partner in one submission, wait for/reveal
@@ -24,6 +25,7 @@ async function loadNext(body) {
 
 function render(body, activity) {
   body.innerHTML = '';
+  body.appendChild(pastRoundsLink(body));
   if (!activity.my_submitted) {
     body.appendChild(renderForm(activity, body));
   } else if (!activity.revealed) {
@@ -31,6 +33,45 @@ function render(body, activity) {
   } else {
     body.appendChild(renderReveal(activity, body));
   }
+}
+
+function pastRoundsLink(body) {
+  const row = document.createElement('div');
+  row.style.cssText = 'text-align:right;margin-bottom:4px;';
+  row.innerHTML = `<button class="btn btn-text" id="keo-past-rounds" style="padding:0;">📜 Past Rounds</button>`;
+  row.querySelector('#keo-past-rounds').addEventListener('click', () => {
+    renderPastRoundsList(body, {
+      activityType: 'know_each_other',
+      title: 'Past Know Each Other',
+      renderItem: renderHistoryItem,
+      onBack: () => loadNext(body),
+    });
+  });
+  return row;
+}
+
+function renderHistoryItem(activity) {
+  const me = meMember();
+  const partner = partnerMember();
+  const predictions = (activity.result && activity.result.payload && activity.result.payload.predictions) || {};
+  const mine = me && predictions[String(me.id)];
+  const theirs = partner && predictions[String(partner.id)];
+
+  const card = document.createElement('div');
+  card.className = 'card mt-8';
+
+  const header = document.createElement('h3');
+  header.style.cssText = 'font-size:15px;margin-bottom:10px;';
+  header.textContent = activity.content.prompt;
+  card.appendChild(header);
+
+  card.appendChild(revealRow(me ? me.name : 'You', activity.my_submission.payload.answer_option, me ? me.avatar_color : '#B7A8B4'));
+  card.appendChild(revealRow(partner ? partner.name : 'Partner', activity.partner_submission.payload.answer_option, partner ? partner.avatar_color : '#B7A8B4'));
+
+  if (mine) card.appendChild(predictionResult(me ? me.name : 'You', mine, true));
+  if (theirs) card.appendChild(predictionResult(partner ? partner.name : 'Partner', theirs, false));
+
+  return card;
 }
 
 function renderForm(activity, body) {
