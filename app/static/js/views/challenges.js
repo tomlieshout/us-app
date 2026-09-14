@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeHtml, openModal, showToast } from '../utils.js';
-import { partnerMember } from '../state.js';
+import { partnerMember, isSpicyUnlocked } from '../state.js';
 
 const CATEGORIES = [
   { key: null, label: 'All', emoji: '🎲' },
@@ -16,9 +16,10 @@ export function openChallengesMenu() {
 }
 
 function categoryChips(body, activeCategory) {
+  const categories = isSpicyUnlocked() ? [...CATEGORIES, { key: 'spicy', label: 'Spicy', emoji: '🔥' }] : CATEGORIES;
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:14px;';
-  CATEGORIES.forEach((c) => {
+  categories.forEach((c) => {
     const chip = document.createElement('button');
     chip.className = `chip ${c.key === activeCategory ? '' : 'chip-muted'}`;
     chip.style.cssText = 'white-space:nowrap;border:none;flex-shrink:0;';
