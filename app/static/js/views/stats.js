@@ -67,7 +67,7 @@ function renderRecord(record, me) {
   return `${r.wins}-${r.losses}-${r.draws}`;
 }
 
-function renderChampionBanner(competitive) {
+export function renderChampionBanner(competitive) {
   if (!competitive.games_played) {
     return `
       <div class="champion-banner">

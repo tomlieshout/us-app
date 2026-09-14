@@ -1,16 +1,20 @@
 import { api } from '../api.js';
 import { escapeHtml, openModal, showToast } from '../utils.js';
 import { meMember, partnerMember } from '../state.js';
-import { renderPastRoundsList } from './game_history.js';
 
-/** Opens the Would You Rather sheet: fetches a fresh random WYR activity,
- * lets the user pick privately, waits for/reveals the partner's pick, and
- * offers "Next Question" to keep playing without ever repeating a
- * question the couple has already been shown (the /api/activities/random
- * picker already guarantees that - see services/activity_questions.py). */
-export function openWyrGame() {
+/** Opens the Would You Rather sheet. With no argument, fetches a fresh
+ * random WYR activity (existing behaviour, unchanged). Passed a
+ * pre-fetched activity (e.g. Home's daily pick), opens that specific one
+ * first instead - "Next Question" still moves on to fresh random ones
+ * from there. Lets Home deep-link into the exact activity it displayed,
+ * rather than the user tapping through to a different random one. */
+export function openWyrGame(initialActivity = null) {
   const { close, body } = openModal('round-modal', { title: 'Would You Rather', render: () => '<div class="skeleton" style="height:260px;"></div>' });
-  loadNext(body);
+  if (initialActivity) {
+    render(body, initialActivity);
+  } else {
+    loadNext(body);
+  }
 }
 
 async function loadNext(body) {
@@ -28,7 +32,6 @@ async function loadNext(body) {
 
 function render(body, activity) {
   body.innerHTML = '';
-  body.appendChild(pastRoundsLink(body));
   if (!activity.my_submitted) {
     body.appendChild(renderChooser(activity, body));
   } else if (!activity.revealed) {
@@ -36,45 +39,6 @@ function render(body, activity) {
   } else {
     body.appendChild(renderReveal(activity, body));
   }
-}
-
-function pastRoundsLink(body) {
-  const row = document.createElement('div');
-  row.style.cssText = 'text-align:right;margin-bottom:4px;';
-  row.innerHTML = `<button class="btn btn-text" id="wyr-past-rounds" style="padding:0;">📜 Past Rounds</button>`;
-  row.querySelector('#wyr-past-rounds').addEventListener('click', () => {
-    renderPastRoundsList(body, {
-      activityType: 'would_you_rather',
-      title: 'Past Would You Rather',
-      renderItem: renderHistoryItem,
-      onBack: () => loadNext(body),
-    });
-  });
-  return row;
-}
-
-function renderHistoryItem(activity) {
-  const me = meMember();
-  const partner = partnerMember();
-  const { option_a, option_b, emoji_a, emoji_b } = activity.content.payload;
-  const myChoice = activity.my_submission.payload.choice;
-  const partnerChoice = activity.partner_submission.payload.choice;
-  const matched = activity.result && activity.result.outcome === 'match';
-
-  const card = document.createElement('div');
-  card.className = 'card mt-8';
-  card.innerHTML = `
-    <p class="wyr-prompt" style="font-size:15px;">${escapeHtml(activity.content.prompt)}</p>
-    <div class="wyr-options">
-      ${optionCard('a', option_a, emoji_a, myChoice, partnerChoice, me, partner)}
-      <div class="wyr-divider">OR</div>
-      ${optionCard('b', option_b, emoji_b, myChoice, partnerChoice, me, partner)}
-    </div>
-    <div class="wyr-result-banner ${matched ? 'match' : 'no-match'}" style="margin-top:10px;">
-      ${matched ? '🎉 Matched' : '🤷 Different picks'}
-    </div>
-  `;
-  return card;
 }
 
 function renderChooser(activity, body) {

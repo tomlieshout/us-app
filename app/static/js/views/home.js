@@ -1,125 +1,211 @@
 import { api } from '../api.js';
-import { escapeHtml, showToast } from '../utils.js';
+import { escapeHtml, showToast, formatRelativeDate } from '../utils.js';
 import { partnerMember } from '../state.js';
 import { openActivityModal } from './round.js';
+import { openWyrGame } from './wyr.js';
+import { openKnowEachOtherGame } from './know_each_other.js';
+import { openWhoWouldGame } from './who_would.js';
 import { openAppreciationMenu } from './appreciation.js';
+import { openChallengesMenu } from './challenges.js';
+import { openPlanForm } from './plans.js';
+import { renderChampionBanner } from './stats.js';
 
-// NOTE (architectural-integration phase): the streak/questions-answered
-// numbers below still come from the legacy /api/stats, which reads
-// legacy Round/Answer/DailySelection history. They're accurate up to the
-// point of this integration but won't increment from new activity played
-// through the new engine until stats gets ported too - flagged, not
-// silently wrong-looking. See the summary given alongside this change.
+/** Home: the app's daily starting point, not a nav menu. Everything here
+ * is aggregated from systems that already exist (see app/services/home.py) -
+ * no new data model, no new scoring, no new privacy rules. This file's
+ * only job is to render what GET /api/home already computed and route
+ * taps into the SAME modals/forms every other tab already uses, so a
+ * "today's activity" tap opens the exact same experience it would from
+ * Games/Questions/Challenges/Plans - nothing is reimplemented here. */
+
+// "game" lane sub-rotates across these three - see _GAME_TYPES in
+// app/services/home.py. Emoji Story is deliberately not part of the daily
+// rotation there, so it never needs an opener here either.
+const GAME_OPENERS = {
+  would_you_rather: openWyrGame,
+  know_each_other: openKnowEachOtherGame,
+  who_would: openWhoWouldGame,
+};
+
+const FEED_ICON = {
+  game_completed: '🎮',
+  appreciation_received: '💌',
+  plan_added: '📝',
+  shared_match: '🔥',
+  challenge_completed: '🎲',
+  memory_created: '📸',
+};
 
 export async function renderHome(container) {
   container.innerHTML = `
     <h1 class="page-title">Home</h1>
-    <div class="card hero-card skeleton" style="height:180px;border:none;"></div>
+    <div class="card hero-card skeleton" style="height:170px;border:none;"></div>
+    <div class="card skeleton mt-16" style="height:90px;"></div>
   `;
 
-  let activity, stats, unseenAppreciation;
+  let data;
   try {
-    [activity, stats, unseenAppreciation] = await Promise.all([
-      api.activities.current(),
-      api.stats(),
-      api.appreciation.unseenCount(),
-    ]);
+    data = await api.home();
   } catch (err) {
     container.innerHTML = `<h1 class="page-title">Home</h1><p class="text-muted mt-16">${escapeHtml(err.message)}</p>`;
     return;
   }
 
-  container.innerHTML = '';
-  if (unseenAppreciation.unseen_count > 0) {
-    container.appendChild(appreciationBanner(unseenAppreciation.unseen_count));
-  }
-  container.appendChild(heroCard(activity));
-  container.appendChild(streakRow(stats));
-  container.appendChild(quickActions());
+  container.innerHTML = '<h1 class="page-title">Home</h1>';
+  container.appendChild(todaysActivityCard(data.today));
+
+  const quickTitle = document.createElement('p');
+  quickTitle.className = 'section-title';
+  quickTitle.textContent = 'Quick Actions';
+  container.appendChild(quickTitle);
+  container.appendChild(quickActionsGrid());
+
+  const champTitle = document.createElement('p');
+  champTitle.className = 'section-title';
+  champTitle.textContent = 'Current Champion';
+  container.appendChild(champTitle);
+  const champWrap = document.createElement('div');
+  champWrap.className = 'card';
+  champWrap.innerHTML = renderChampionBanner(data.champion);
+  container.appendChild(champWrap);
+
+  const feedTitle = document.createElement('p');
+  feedTitle.className = 'section-title';
+  feedTitle.textContent = 'Recent Activity';
+  container.appendChild(feedTitle);
+  container.appendChild(recentActivityCard(data.recent_activity));
 }
 
-function appreciationBanner(count) {
+function refresh() {
+  const container = document.getElementById('view-home');
+  if (container) renderHome(container);
+}
+
+// ------------------------------------------------------- Today's Activity
+
+function todaysActivityCard(today) {
+  return today.kind === 'reveal' ? revealCard(today) : actionCard(today);
+}
+
+function revealCard(today) {
   const partner = partnerMember();
+  const activity = today.activity;
+
   const wrap = document.createElement('button');
-  wrap.className = 'card card-tap mt-16';
-  wrap.style.cssText = 'display:flex;align-items:center;gap:12px;text-align:left;width:100%;background:var(--accent-soft);border:none;';
-  wrap.innerHTML = `
-    <span style="font-size:26px;">💌</span>
-    <span>
-      <span style="font-weight:700;font-size:14.5px;color:var(--accent-strong);display:block;">
-        New appreciation from ${partner ? escapeHtml(partner.name) : 'your partner'}
-      </span>
-      <span class="text-muted small">Tap to read it</span>
-    </span>
-  `;
-  wrap.addEventListener('click', () => openAppreciationMenu('received'));
-  return wrap;
-}
+  wrap.className = 'card card-tap hero-card';
+  wrap.style.cssText = 'display:block;width:100%;text-align:left;';
 
-function heroCard(activity) {
-  const partner = partnerMember();
-  const wrap = document.createElement('div');
-  wrap.className = 'card hero-card';
-
-  let eyebrow = "Today's Question";
-  let cta = 'Answer Question';
+  let eyebrow = `Today's ${today.label}`;
   let sub = '';
+  let cta = today.lane === 'question' ? 'Answer now' : 'Play now';
 
-  if (activity.revealed) {
-    eyebrow = "Today's Question · Revealed";
-    cta = 'View Answers';
-  } else if (activity.my_submitted) {
-    eyebrow = "Today's Question";
-    cta = 'View Status';
-    sub = `<p style="color:rgba(255,255,255,0.85);font-size:13px;margin-top:-8px;margin-bottom:14px;">✓ You've answered. Waiting for ${partner ? escapeHtml(partner.name) : 'your partner'}…</p>`;
+  if (activity.my_submitted && !activity.revealed) {
+    eyebrow += ' · Waiting';
+    sub = `<p class="reveal-sub">❤️ Waiting for ${partner ? escapeHtml(partner.name) : 'your partner'}</p>`;
+    cta = 'View status';
+  } else if (activity.revealed) {
+    eyebrow += ' · Ready';
+    sub = `<p class="reveal-sub">💌 Your answers are ready</p>`;
+    cta = 'Reveal';
   } else if (activity.partner_submitted) {
-    sub = `<p style="color:rgba(255,255,255,0.85);font-size:13px;margin-top:-8px;margin-bottom:14px;">❤️ ${partner ? escapeHtml(partner.name) : 'Your partner'} already answered — yours is still hidden.</p>`;
+    // Never reveals what the partner said - just that they went first.
+    sub = `<p class="reveal-sub">❤️ ${partner ? escapeHtml(partner.name) : 'Your partner'} already went - yours is still hidden.</p>`;
   }
 
   wrap.innerHTML = `
-    <div class="hero-eyebrow">${eyebrow}</div>
+    <div class="hero-eyebrow">${escapeHtml(eyebrow)}</div>
     <div class="hero-question">${escapeHtml(activity.content.prompt)}</div>
     ${sub}
-    <button class="btn btn-primary btn-block" id="hero-cta">${cta}</button>
+    <span class="btn btn-primary btn-block" style="pointer-events:none;">${escapeHtml(cta)}</span>
   `;
 
-  wrap.querySelector('#hero-cta').addEventListener('click', () => {
-    openActivityModal(activity.activity_id, { onChange: () => renderHome(document.getElementById('view-home')) });
+  wrap.addEventListener('click', () => {
+    if (today.activity_type === 'classic_question') {
+      openActivityModal(activity.activity_id, { onChange: refresh });
+    } else {
+      const opener = GAME_OPENERS[today.activity_type];
+      if (opener) opener(activity);
+    }
   });
 
   return wrap;
 }
 
-function streakRow(stats) {
-  const wrap = document.createElement('div');
-  wrap.className = 'streak-row';
+function actionCard(today) {
+  const done = today.state === 'done_today';
+
+  const wrap = document.createElement('button');
+  wrap.className = 'card card-tap action-lane-card';
   wrap.innerHTML = `
-    <div class="streak-pill"><div class="num">${stats.current_streak}🔥</div><div class="lbl">Current Streak</div></div>
-    <div class="streak-pill"><div class="num">${stats.longest_streak}</div><div class="lbl">Longest Streak</div></div>
-    <div class="streak-pill"><div class="num">${stats.questions_answered}</div><div class="lbl">Answered</div></div>
+    <span class="emoji-badge">${today.emoji}</span>
+    <span style="flex:1;">
+      <span class="title">${escapeHtml(today.title)}</span>
+      <span class="text-muted small">${escapeHtml(done ? today.done_subtitle : today.subtitle)}</span>
+    </span>
+    ${done ? '<span class="done-check">✓</span>' : ''}
   `;
+
+  wrap.addEventListener('click', () => {
+    if (today.lane === 'appreciation') openAppreciationMenu('sent');
+    else if (today.lane === 'challenge') openChallengesMenu();
+    else if (today.lane === 'plan') openPlanForm({ onSaved: refresh });
+  });
+
   return wrap;
 }
 
-function quickActions() {
+// ----------------------------------------------------------- Quick Actions
+
+function quickActionsGrid() {
   const wrap = document.createElement('div');
-  wrap.className = 'quick-actions';
+  wrap.className = 'quick-actions-grid';
   wrap.innerHTML = `
-    <button class="quick-action" id="qa-random"><span class="emoji">🎲</span>Random Question</button>
-    <button class="quick-action" id="qa-browse"><span class="emoji">📚</span>Browse Categories</button>
-    <button class="quick-action" id="qa-appreciate"><span class="emoji">💌</span>Appreciate</button>
+    <button class="quick-action" id="qa-game"><span class="emoji">🎮</span>Play a Game</button>
+    <button class="quick-action" id="qa-question"><span class="emoji">❓</span>Answer Question</button>
+    <button class="quick-action" id="qa-appreciate"><span class="emoji">💌</span>Send Appreciation</button>
+    <button class="quick-action" id="qa-plan"><span class="emoji">📝</span>Add Plan</button>
   `;
-  wrap.querySelector('#qa-random').addEventListener('click', async () => {
+
+  wrap.querySelector('#qa-game').addEventListener('click', () => {
+    document.querySelector('.nav-btn[data-view="games"]').click();
+  });
+  wrap.querySelector('#qa-question').addEventListener('click', async () => {
     try {
-      const activity = await api.activities.random();
-      openActivityModal(activity.activity_id, { onChange: () => renderHome(document.getElementById('view-home')) });
+      const activity = await api.activities.random({ activity_type: 'classic_question' });
+      openActivityModal(activity.activity_id, { onChange: refresh });
     } catch (err) {
       showToast(err.message);
     }
   });
-  wrap.querySelector('#qa-browse').addEventListener('click', () => {
-    document.querySelector('.nav-btn[data-view="questions"]').click();
-  });
   wrap.querySelector('#qa-appreciate').addEventListener('click', () => openAppreciationMenu('sent'));
+  wrap.querySelector('#qa-plan').addEventListener('click', () => openPlanForm({ onSaved: refresh }));
+
+  return wrap;
+}
+
+// --------------------------------------------------------- Recent Activity
+
+function recentActivityCard(items) {
+  const wrap = document.createElement('div');
+  wrap.className = 'card';
+
+  if (items.length === 0) {
+    wrap.innerHTML = `<p class="text-muted small" style="padding:8px 0;">Nothing yet - play a game, send an appreciation, or add a plan to get started.</p>`;
+    return wrap;
+  }
+
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'feed-item';
+    row.innerHTML = `
+      <span class="feed-icon">${FEED_ICON[item.type] || '✨'}</span>
+      <span>
+        <span class="feed-text">${escapeHtml(item.text)}</span>
+        <span class="feed-time">${formatRelativeDate(item.timestamp)}</span>
+      </span>
+    `;
+    wrap.appendChild(row);
+  });
+
   return wrap;
 }

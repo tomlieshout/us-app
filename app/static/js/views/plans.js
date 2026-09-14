@@ -162,7 +162,7 @@ function renderPlanItem(plan, cat, onChange) {
   return item;
 }
 
-function openPlanForm({ plan, category, onSaved, onDeleted }) {
+export function openPlanForm({ plan, category, onSaved, onDeleted }) {
   const isEdit = !!plan;
   const { body } = openModal('round-modal', {
     title: isEdit ? 'Edit Plan' : 'Add a Plan',

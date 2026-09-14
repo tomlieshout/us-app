@@ -76,10 +76,17 @@ def pick_content_for_couple(couple, activity_type="classic_question", category=N
     return random.choice(pool)
 
 
-def get_or_create_daily_activity(couple, spicy_unlocked_flag=False):
+def get_or_create_daily_activity(couple, spicy_unlocked_flag=False, activity_type="classic_question"):
     """One shared Activity per couple per calendar day, in the couple's
     own timezone. Repeated calls on the same day return the same Activity -
-    the exact guarantee the legacy get_or_create_daily_round makes."""
+    the exact guarantee the legacy get_or_create_daily_round makes.
+
+    activity_type defaults to "classic_question" (unchanged from before) so
+    the existing /api/activities/current route's behavior is untouched -
+    it never passes this argument. Home's daily-rotation (see
+    app/services/home.py) is the only caller that passes something else,
+    reusing this same one-row-per-couple-per-day mechanism rather than
+    inventing a second one."""
     today = couple_local_today(couple)
     existing = ActivityDailySelection.query.filter_by(couple_id=couple.id, date=today).first()
     if existing and existing.activity is not None:
@@ -91,7 +98,7 @@ def get_or_create_daily_activity(couple, spicy_unlocked_flag=False):
         db.session.delete(existing)
         db.session.flush()
 
-    content = pick_content_for_couple(couple, spicy_unlocked_flag=spicy_unlocked_flag)
+    content = pick_content_for_couple(couple, activity_type=activity_type, spicy_unlocked_flag=spicy_unlocked_flag)
     if content is None:
         return None
 

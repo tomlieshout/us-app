@@ -1,15 +1,18 @@
 import { api } from '../api.js';
 import { escapeHtml, openModal, showToast } from '../utils.js';
 import { meMember, partnerMember } from '../state.js';
-import { renderPastRoundsList } from './game_history.js';
 
-/** Opens the Who Would sheet: fetch a random activity, pick "Me" or
- * "Partner" (+ an optional reason), wait for/reveal both picks, show
- * whether it was unanimous. Deliberately no scoring anywhere - see
- * WhoWouldActivity.compute_result. */
-export function openWhoWouldGame() {
+/** Opens the Who Would sheet. With no argument, fetches a fresh random
+ * activity (existing behaviour, unchanged). Passed a pre-fetched activity
+ * (e.g. Home's daily pick), opens that specific one first instead - same
+ * pattern as wyr.js's openWyrGame. */
+export function openWhoWouldGame(initialActivity = null) {
   const { body } = openModal('round-modal', { title: 'Who Would...?', render: () => '<div class="skeleton" style="height:260px;"></div>' });
-  loadNext(body);
+  if (initialActivity) {
+    render(body, initialActivity);
+  } else {
+    loadNext(body);
+  }
 }
 
 async function loadNext(body) {
@@ -26,7 +29,6 @@ async function loadNext(body) {
 
 function render(body, activity) {
   body.innerHTML = '';
-  body.appendChild(pastRoundsLink(body));
   if (!activity.my_submitted) {
     body.appendChild(renderChooser(activity, body));
   } else if (!activity.revealed) {
@@ -34,63 +36,6 @@ function render(body, activity) {
   } else {
     body.appendChild(renderReveal(activity, body));
   }
-}
-
-function pastRoundsLink(body) {
-  const row = document.createElement('div');
-  row.style.cssText = 'text-align:right;margin-bottom:4px;';
-  row.innerHTML = `<button class="btn btn-text" id="ww-past-rounds" style="padding:0;">📜 Past Rounds</button>`;
-  row.querySelector('#ww-past-rounds').addEventListener('click', () => {
-    renderPastRoundsList(body, {
-      activityType: 'who_would',
-      title: 'Past Who Would...?',
-      renderItem: renderHistoryItem,
-      onBack: () => loadNext(body),
-    });
-  });
-  return row;
-}
-
-function renderHistoryItem(activity) {
-  const me = meMember();
-  const partner = partnerMember();
-  const picks = (activity.result && activity.result.payload && activity.result.payload.picks) || {};
-  const unanimous = activity.result && activity.result.outcome === 'unanimous';
-
-  const nameFor = (userId) => {
-    if (me && userId === me.id) return me.name;
-    if (partner && userId === partner.id) return partner.name;
-    return 'Someone';
-  };
-
-  const card = document.createElement('div');
-  card.className = 'card mt-8';
-  card.innerHTML = `<p class="wyr-prompt" style="font-size:15px;">${escapeHtml(activity.content.prompt)}</p>`;
-
-  [
-    { member: me, submission: activity.my_submission },
-    { member: partner, submission: activity.partner_submission },
-  ].forEach(({ member, submission }) => {
-    if (!member || !submission) return;
-    const pick = picks[String(member.id)];
-    const pickedName = pick ? nameFor(pick.chose_user_id) : '?';
-    const row = document.createElement('div');
-    row.className = 'reveal-answer-card mt-8';
-    row.innerHTML = `
-      <div class="who"><span class="avatar" style="width:22px;height:22px;font-size:10px;background:${member.avatar_color};">${member.name.charAt(0).toUpperCase()}</span> ${escapeHtml(member.name)}</div>
-      <p class="answer-text">${escapeHtml(pickedName)}</p>
-      ${submission.payload.explanation ? `<p class="text-muted small mt-8">"${escapeHtml(submission.payload.explanation)}"</p>` : ''}
-    `;
-    card.appendChild(row);
-  });
-
-  const banner = document.createElement('div');
-  banner.className = `wyr-result-banner ${unanimous ? 'match' : 'no-match'}`;
-  banner.style.marginTop = '10px';
-  banner.textContent = unanimous ? '😂 UNANIMOUS' : '🤷 Split decision';
-  card.appendChild(banner);
-
-  return card;
 }
 
 function renderChooser(activity, body) {
