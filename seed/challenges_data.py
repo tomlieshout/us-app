@@ -72,3 +72,15 @@ CHALLENGES += [
     {"prompt": "Pick one thing from your Comfort Scale matches you're both curious about and actually try it this week", "category": "spicy", "requires_both": True},
     {"prompt": "Take turns being completely in charge for 20 minutes, no questions asked", "category": "spicy", "requires_both": True},
 ]
+
+# -------------------------------------------------- Spicy 🌶️ - Expanded
+CHALLENGES += [
+    {"prompt": "Plan a full 'no interruptions' night for your partner, start to finish", "category": "spicy", "requires_both": False},
+    {"prompt": "Try a new position together and rate it out of 10, no judgment", "category": "spicy", "requires_both": True},
+    {"prompt": "Take a slow shower or bath together with zero rushing", "category": "spicy", "requires_both": True},
+    {"prompt": "Each write down 3 things you want to try together in the next month, then compare lists", "category": "spicy", "requires_both": True},
+    {"prompt": "Send a flirty voice note or text to each other today", "category": "spicy", "requires_both": False},
+    {"prompt": "Recreate your favourite intimate memory together", "category": "spicy", "requires_both": True},
+    {"prompt": "Try a full session with a 'no talking, just touch' rule", "category": "spicy", "requires_both": True},
+    {"prompt": "Plan a themed evening around a fantasy you've both mentioned wanting to try", "category": "spicy", "requires_both": True},
+]
