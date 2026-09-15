@@ -62,25 +62,34 @@ CHALLENGES += [
 ]
 
 # -------------------------------------------------------------- Spicy 🌶️
+# Rewritten for an experienced couple: no "try a new position"-style vanilla
+# prompts, and nothing that requires buying anything new - everything here
+# either needs nothing at all, or reuses toys/restraints/gear you already
+# have. "Going somewhere new" (a drive, a different room) is fine and used
+# a couple of times - that's not a purchase, just a change of scene.
 CHALLENGES += [
-    {"prompt": "Each write down one thing you'd like to try in bed, then swap and talk it through", "category": "spicy", "requires_both": True},
-    {"prompt": "Give each other a 10-minute massage that's allowed to lead wherever it leads", "category": "spicy", "requires_both": True},
-    {"prompt": "Wear something for your partner tonight that you've been wanting to but haven't yet", "category": "spicy", "requires_both": False},
-    {"prompt": "Send your partner a message describing exactly what you want to do to them tonight", "category": "spicy", "requires_both": False},
-    {"prompt": "Try a new position together tonight and talk about what you liked afterward", "category": "spicy", "requires_both": True},
-    {"prompt": "Spend 15 minutes exploring each other with a blindfold on, taking turns", "category": "spicy", "requires_both": True},
-    {"prompt": "Pick one thing from your Comfort Scale matches you're both curious about and actually try it this week", "category": "spicy", "requires_both": True},
-    {"prompt": "Take turns being completely in charge for 20 minutes, no questions asked", "category": "spicy", "requires_both": True},
-]
-
-# -------------------------------------------------- Spicy 🌶️ - Expanded
-CHALLENGES += [
-    {"prompt": "Plan a full 'no interruptions' night for your partner, start to finish", "category": "spicy", "requires_both": False},
-    {"prompt": "Try a new position together and rate it out of 10, no judgment", "category": "spicy", "requires_both": True},
-    {"prompt": "Take a slow shower or bath together with zero rushing", "category": "spicy", "requires_both": True},
-    {"prompt": "Each write down 3 things you want to try together in the next month, then compare lists", "category": "spicy", "requires_both": True},
-    {"prompt": "Send a flirty voice note or text to each other today", "category": "spicy", "requires_both": False},
-    {"prompt": "Recreate your favourite intimate memory together", "category": "spicy", "requires_both": True},
-    {"prompt": "Try a full session with a 'no talking, just touch' rule", "category": "spicy", "requires_both": True},
-    {"prompt": "Plan a themed evening around a fantasy you've both mentioned wanting to try", "category": "spicy", "requires_both": True},
+    {"prompt": "Have anal sex tonight and let your partner set the entire pace - you don't take control back once it starts", "category": "spicy", "requires_both": True},
+    {"prompt": "Spend five minutes on rimming (oral) before anything else happens tonight", "category": "spicy", "requires_both": True},
+    {"prompt": "Wear a butt plug for the next hour while you carry on with whatever's already planned tonight", "category": "spicy", "requires_both": True},
+    {"prompt": "Spend longer on anal prep than you normally would - fingers only, no rushing to the main event", "category": "spicy", "requires_both": True},
+    {"prompt": "Use whatever you already have on hand - a tie, a scarf, actual cuffs - to restrain your partner's wrists for the next round", "category": "spicy", "requires_both": True},
+    {"prompt": "Blindfold your partner and don't let them touch you back for the next 10 minutes", "category": "spicy", "requires_both": True},
+    {"prompt": "Tie your partner's wrists behind their back for the next round - whatever you've already got works", "category": "spicy", "requires_both": True},
+    {"prompt": "Restrain your partner and don't let them finish until they've asked at least three times", "category": "spicy", "requires_both": True},
+    {"prompt": "Make the next round entirely rough from the start - no gentle build-up, straight into spanking and pace", "category": "spicy", "requires_both": True},
+    {"prompt": "Give your partner ten open-hand spanks before anything else starts tonight", "category": "spicy", "requires_both": True},
+    {"prompt": "Pull your partner's hair the next time you kiss, and don't stop until they ask", "category": "spicy", "requires_both": True},
+    {"prompt": "Pin your partner's wrists above their head for the entire next round - no letting go", "category": "spicy", "requires_both": True},
+    {"prompt": "Slap - not just spank - at least once tonight, wherever you'd already agreed is fair game", "category": "spicy", "requires_both": True},
+    {"prompt": "Use whichever vibrator you already own on your partner for five straight minutes before anything else", "category": "spicy", "requires_both": True},
+    {"prompt": "Bring your favourite toy into tonight instead of saving it for later", "category": "spicy", "requires_both": True},
+    {"prompt": "If you own a remote-control toy, wear it out tonight - dinner, a drive, wherever you're already going - and hand your partner the control", "category": "spicy", "requires_both": True},
+    {"prompt": "Film 30 seconds of tonight on your phone - decide together afterward whether to keep it or delete it", "category": "spicy", "requires_both": True},
+    {"prompt": "Take one photo of tonight together, then decide on the spot whether it stays or goes", "category": "spicy", "requires_both": True},
+    {"prompt": "Have sex somewhere in the house you haven't yet - not the bedroom", "category": "spicy", "requires_both": True},
+    {"prompt": "Go somewhere new tonight - a drive, a walk, anywhere you haven't been together - and see what happens when you get there", "category": "spicy", "requires_both": False},
+    {"prompt": "Take control completely for the next 20 minutes - your partner doesn't get a say in anything that happens", "category": "spicy", "requires_both": True},
+    {"prompt": "Talk dirty out loud the entire time tonight - no going quiet", "category": "spicy", "requires_both": True},
+    {"prompt": "Tell your partner exactly what you're about to do to them, step by step, right before you do it", "category": "spicy", "requires_both": False},
+    {"prompt": "Send your partner a message right now describing exactly what you want to do to them tonight", "category": "spicy", "requires_both": False},
 ]
