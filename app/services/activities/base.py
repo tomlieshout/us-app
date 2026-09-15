@@ -19,6 +19,7 @@ from datetime import datetime
 
 from app.extensions import db
 from app.models import ActivityResult, ActivitySubmission
+from app.services.activity_questions import get_current_cycle
 
 
 class ActivityValidationError(Exception):
@@ -92,6 +93,7 @@ class ActivityHandler:
             activity_id=activity.id,
             user_id=user.id,
             is_private=is_private,
+            cycle=get_current_cycle(user, activity.content.activity_type),
         )
         submission.payload = normalized
         db.session.add(submission)

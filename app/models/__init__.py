@@ -6,7 +6,14 @@ from app.models.answer import Answer
 from app.models.reaction import Reaction
 from app.models.comment import Comment
 from app.models.favourite import Favourite
-from app.models.activity import Activity, ActivityContent, ActivityDailySelection, ActivitySubmission, ActivityResult
+from app.models.activity import (
+    Activity,
+    ActivityContent,
+    ActivityCycle,
+    ActivityDailySelection,
+    ActivitySubmission,
+    ActivityResult,
+)
 from app.models.twenty_questions import TwentyQuestionsGame, TwentyQuestionsTurn
 from app.models.challenge import CoupleChallenge
 from app.models.appreciation import Appreciation
@@ -25,6 +32,7 @@ __all__ = [
     "Favourite",
     "Activity",
     "ActivityContent",
+    "ActivityCycle",
     "ActivityDailySelection",
     "ActivitySubmission",
     "ActivityResult",

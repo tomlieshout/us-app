@@ -1,50 +1,57 @@
 import { api } from '../api.js';
 import { escapeHtml, openModal, showToast } from '../utils.js';
 import { meMember, partnerMember } from '../state.js';
+import { createGameScreen } from './game_screen.js';
 
-/** Opens the Know Each Other sheet. With no argument, fetches a fresh
- * random activity (existing behaviour, unchanged). Passed a pre-fetched
+/** Opens the Know Each Other sheet. With no argument, fetches the next
+ * activity in whichever toggle mode is selected. Passed a pre-fetched
  * activity (e.g. Home's daily pick), opens that specific one first
- * instead - same pattern as wyr.js's openWyrGame. */
+ * instead - same pattern as wyr.js's openWyrGame.
+ *
+ * Toggle, completion/Play Again and Past Answers all come from
+ * createGameScreen (game_screen.js); this file supplies only the
+ * Know-Each-Other-specific rendering. */
 export function openKnowEachOtherGame(initialActivity = null) {
   const { body } = openModal('round-modal', { title: 'Know Each Other', render: () => '<div class="skeleton" style="height:300px;"></div>' });
+
+  const screen = createGameScreen(body, {
+    activityType: 'know_each_other',
+    skeletonHeight: 300,
+    renderActivity,
+    renderMutual: renderPastMutual,
+    describeMine,
+    completion: {
+      emoji: '🧠',
+      heading: "You've answered every Know Each Other question!",
+      body: "That's the whole bank. Start a fresh round of them, or leave it here for now.",
+    },
+  });
+
   if (initialActivity) {
-    render(body, initialActivity);
+    screen.showActivity(initialActivity);
   } else {
-    loadNext(body);
+    screen.loadNext();
   }
 }
 
-async function loadNext(body) {
-  body.innerHTML = '<div class="skeleton" style="height:300px;"></div>';
-  let activity;
-  try {
-    activity = await api.activities.random({ activity_type: 'know_each_other' });
-  } catch (err) {
-    body.innerHTML = `<p class="text-muted" style="padding:30px 0;text-align:center;">${escapeHtml(err.message)}</p>`;
-    return;
-  }
-  render(body, activity);
-}
-
-function render(body, activity) {
-  body.innerHTML = '';
+function renderActivity(slot, activity, screen) {
+  slot.innerHTML = '';
   if (!activity.my_submitted) {
-    body.appendChild(renderForm(activity, body));
+    slot.appendChild(renderForm(activity, screen));
   } else if (!activity.revealed) {
-    body.appendChild(renderWaiting());
+    slot.appendChild(renderWaiting(screen));
   } else {
-    body.appendChild(renderReveal(activity, body));
+    slot.appendChild(renderReveal(activity, screen));
   }
 }
 
-function renderForm(activity, body) {
+function renderForm(activity, screen) {
   const wrap = document.createElement('div');
   const { question_type, options, predict_text } = activity.content.payload;
   const selection = { answer_option: null, predicted_option: null };
 
   const header = document.createElement('h2');
-  header.style.cssText = 'font-size:19px;line-height:1.35;margin-bottom:16px;';
+  header.style.cssText = 'font-size:19px;line-height:1.35;margin:16px 0;';
   header.textContent = activity.content.prompt;
   wrap.appendChild(header);
 
@@ -68,9 +75,15 @@ function renderForm(activity, body) {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Submitting…';
     try {
-      await api.activities.submit(activity.activity_id, selection);
+      const updated = await api.activities.submit(activity.activity_id, selection);
       showToast('Locked in ✓');
-      loadNext(body);
+      // Completing a round the partner had already answered reveals
+      // immediately - show it rather than skipping past the reveal.
+      if (updated && updated.revealed) {
+        screen.showActivity(updated);
+      } else {
+        screen.loadNext();
+      }
     } catch (err) {
       showToast(err.message || 'Could not submit.');
       submitBtn.disabled = false;
@@ -125,7 +138,7 @@ function optionPicker(questionType, options, onSelect) {
   return list;
 }
 
-function renderWaiting() {
+function renderWaiting(screen) {
   const wrap = document.createElement('div');
   const partner = partnerMember();
   wrap.innerHTML = `
@@ -138,10 +151,30 @@ function renderWaiting() {
       </p>
     </div>
   `;
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-primary btn-block mt-16';
+  nextBtn.textContent = 'Next Question';
+  nextBtn.addEventListener('click', () => screen.loadNext());
+  wrap.appendChild(nextBtn);
   return wrap;
 }
 
-function renderReveal(activity, body) {
+function renderReveal(activity, screen) {
+  const wrap = document.createElement('div');
+  wrap.appendChild(revealBody(activity));
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-primary btn-block mt-16';
+  nextBtn.textContent = 'Next Question';
+  nextBtn.addEventListener('click', () => screen.loadNext());
+  wrap.appendChild(nextBtn);
+
+  return wrap;
+}
+
+/** The reveal itself with no navigation attached - shared by the live
+ * reveal screen and Past Answers' "Mutual" tab. */
+function revealBody(activity) {
   const wrap = document.createElement('div');
   const me = meMember();
   const partner = partnerMember();
@@ -150,7 +183,7 @@ function renderReveal(activity, body) {
   const theirs = partner && predictions[String(partner.id)];
 
   const header = document.createElement('h2');
-  header.style.cssText = 'font-size:19px;line-height:1.35;margin-bottom:16px;';
+  header.style.cssText = 'font-size:19px;line-height:1.35;margin:16px 0;';
   header.textContent = activity.content.prompt;
   wrap.appendChild(header);
 
@@ -164,13 +197,26 @@ function renderReveal(activity, body) {
     wrap.appendChild(predictionResult(partner ? partner.name : 'Partner', theirs, false));
   }
 
-  const nextBtn = document.createElement('button');
-  nextBtn.className = 'btn btn-primary btn-block mt-16';
-  nextBtn.textContent = 'Next Question';
-  nextBtn.addEventListener('click', () => loadNext(body));
-  wrap.appendChild(nextBtn);
-
   return wrap;
+}
+
+function renderPastMutual(activity) {
+  const card = document.createElement('div');
+  card.className = 'card mt-8';
+  card.style.padding = '14px';
+  card.appendChild(revealBody(activity));
+  return card;
+}
+
+/** One-line summary of my own answer, for the "Mine" tab - which
+ * includes rounds the partner hasn't answered yet, so this must never
+ * read anything but my own submission. My prediction is intentionally
+ * not shown: it's about them, and showing it before the reveal would
+ * spoil my own result. */
+function describeMine(activity) {
+  const sub = activity.my_submission;
+  if (!sub || !sub.payload || !sub.payload.answer_option) return '';
+  return `Your answer: ${sub.payload.answer_option}`;
 }
 
 function revealRow(name, value, color) {
@@ -187,7 +233,7 @@ function predictionResult(name, prediction, mine) {
   const good = prediction.points > 0;
   const el = document.createElement('div');
   el.className = `prediction-result ${good ? 'correct' : 'incorrect'}`;
-  const verb = mine ? 'You' : escapeHtml(name);
-  el.textContent = `${good ? '🎯' : '🤔'} ${verb} guessed "${escapeHtml(prediction.predicted)}" — +${prediction.points} point${prediction.points === 1 ? '' : 's'}.`;
+  const verb = mine ? 'You' : name;
+  el.textContent = `${good ? '🎯' : '🤔'} ${verb} guessed "${prediction.predicted}" — +${prediction.points} point${prediction.points === 1 ? '' : 's'}.`;
   return el;
 }

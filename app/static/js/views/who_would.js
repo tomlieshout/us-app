@@ -1,50 +1,57 @@
 import { api } from '../api.js';
 import { escapeHtml, openModal, showToast } from '../utils.js';
 import { meMember, partnerMember } from '../state.js';
+import { createGameScreen } from './game_screen.js';
 
-/** Opens the Who Would sheet. With no argument, fetches a fresh random
- * activity (existing behaviour, unchanged). Passed a pre-fetched activity
+/** Opens the Who Would sheet. With no argument, fetches the next activity
+ * in whichever toggle mode is selected. Passed a pre-fetched activity
  * (e.g. Home's daily pick), opens that specific one first instead - same
- * pattern as wyr.js's openWyrGame. */
+ * pattern as wyr.js's openWyrGame.
+ *
+ * Toggle, completion/Play Again and Past Answers all come from
+ * createGameScreen (game_screen.js); this file supplies only the
+ * Who-Would-specific rendering. */
 export function openWhoWouldGame(initialActivity = null) {
   const { body } = openModal('round-modal', { title: 'Who Would...?', render: () => '<div class="skeleton" style="height:260px;"></div>' });
+
+  const screen = createGameScreen(body, {
+    activityType: 'who_would',
+    skeletonHeight: 260,
+    renderActivity,
+    renderMutual: renderPastMutual,
+    describeMine,
+    completion: {
+      emoji: '🤭',
+      heading: "You've answered every Who Would question!",
+      body: "That's the whole bank. Start a fresh round of them, or leave it here for now.",
+    },
+  });
+
   if (initialActivity) {
-    render(body, initialActivity);
+    screen.showActivity(initialActivity);
   } else {
-    loadNext(body);
+    screen.loadNext();
   }
 }
 
-async function loadNext(body) {
-  body.innerHTML = '<div class="skeleton" style="height:260px;"></div>';
-  let activity;
-  try {
-    activity = await api.activities.random({ activity_type: 'who_would' });
-  } catch (err) {
-    body.innerHTML = `<p class="text-muted" style="padding:30px 0;text-align:center;">${escapeHtml(err.message)}</p>`;
-    return;
-  }
-  render(body, activity);
-}
-
-function render(body, activity) {
-  body.innerHTML = '';
+function renderActivity(slot, activity, screen) {
+  slot.innerHTML = '';
   if (!activity.my_submitted) {
-    body.appendChild(renderChooser(activity, body));
+    slot.appendChild(renderChooser(activity, screen));
   } else if (!activity.revealed) {
-    body.appendChild(renderWaiting());
+    slot.appendChild(renderWaiting(screen));
   } else {
-    body.appendChild(renderReveal(activity, body));
+    slot.appendChild(renderReveal(activity, screen));
   }
 }
 
-function renderChooser(activity, body) {
+function renderChooser(activity, screen) {
   const wrap = document.createElement('div');
   const partner = partnerMember();
   const selection = { choice: null, explanation: '' };
 
   wrap.innerHTML = `
-    <p class="wyr-prompt">${escapeHtml(activity.content.prompt)}</p>
+    <p class="wyr-prompt mt-16">${escapeHtml(activity.content.prompt)}</p>
     <div class="answer-option-list mt-16">
       <button type="button" class="answer-option" data-choice="me">🙋 Me</button>
       <button type="button" class="answer-option" data-choice="partner">${partner ? escapeHtml(partner.name) : 'My partner'}</button>
@@ -71,9 +78,15 @@ function renderChooser(activity, body) {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Submitting…';
     try {
-      await api.activities.submit(activity.activity_id, { choice: selection.choice, explanation: selection.explanation.trim() });
+      const updated = await api.activities.submit(activity.activity_id, { choice: selection.choice, explanation: selection.explanation.trim() });
       showToast('Locked in ✓');
-      loadNext(body);
+      // Completing a round the partner had already answered reveals
+      // immediately - show it rather than skipping past the reveal.
+      if (updated && updated.revealed) {
+        screen.showActivity(updated);
+      } else {
+        screen.loadNext();
+      }
     } catch (err) {
       showToast(err.message || 'Could not submit.');
       submitBtn.disabled = false;
@@ -84,7 +97,7 @@ function renderChooser(activity, body) {
   return wrap;
 }
 
-function renderWaiting() {
+function renderWaiting(screen) {
   const wrap = document.createElement('div');
   const partner = partnerMember();
   wrap.innerHTML = `
@@ -96,10 +109,30 @@ function renderWaiting() {
       </p>
     </div>
   `;
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-primary btn-block mt-16';
+  nextBtn.textContent = 'Next Question';
+  nextBtn.addEventListener('click', () => screen.loadNext());
+  wrap.appendChild(nextBtn);
   return wrap;
 }
 
-function renderReveal(activity, body) {
+function renderReveal(activity, screen) {
+  const wrap = document.createElement('div');
+  wrap.appendChild(revealBody(activity));
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-primary btn-block mt-16';
+  nextBtn.textContent = 'Next Question';
+  nextBtn.addEventListener('click', () => screen.loadNext());
+  wrap.appendChild(nextBtn);
+
+  return wrap;
+}
+
+/** The reveal itself with no navigation attached - shared by the live
+ * reveal screen and Past Answers' "Mutual" tab. */
+function revealBody(activity) {
   const wrap = document.createElement('div');
   const me = meMember();
   const partner = partnerMember();
@@ -112,7 +145,7 @@ function renderReveal(activity, body) {
     return 'Someone';
   };
 
-  wrap.innerHTML = `<p class="wyr-prompt">${escapeHtml(activity.content.prompt)}</p>`;
+  wrap.innerHTML = `<p class="wyr-prompt mt-16">${escapeHtml(activity.content.prompt)}</p>`;
 
   [
     { member: me, submission: activity.my_submission },
@@ -136,11 +169,29 @@ function renderReveal(activity, body) {
   banner.textContent = unanimous ? '😂 UNANIMOUS' : '🤷 Split decision!';
   wrap.appendChild(banner);
 
-  const nextBtn = document.createElement('button');
-  nextBtn.className = 'btn btn-primary btn-block mt-16';
-  nextBtn.textContent = 'Next Question';
-  nextBtn.addEventListener('click', () => loadNext(body));
-  wrap.appendChild(nextBtn);
-
   return wrap;
+}
+
+function renderPastMutual(activity) {
+  const card = document.createElement('div');
+  card.className = 'card mt-8';
+  card.style.padding = '14px';
+  card.appendChild(revealBody(activity));
+  return card;
+}
+
+/** One-line summary of my own pick, for the "Mine" tab - which includes
+ * rounds the partner hasn't answered yet, so it must read only my own
+ * submission. "me"/"partner" is relative to the submitter (see
+ * services/activities/who_would.py), and this is always my submission,
+ * so resolving it against my own identity is correct here. */
+function describeMine(activity) {
+  const sub = activity.my_submission;
+  if (!sub || !sub.payload || !sub.payload.choice) return '';
+  const me = meMember();
+  const partner = partnerMember();
+  const picked = sub.payload.choice === 'me'
+    ? (me ? me.name : 'you')
+    : (partner ? partner.name : 'your partner');
+  return `You said: ${picked}`;
 }

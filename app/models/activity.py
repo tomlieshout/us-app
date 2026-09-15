@@ -165,6 +165,13 @@ class ActivitySubmission(db.Model):
     # Answer's, is an application-layer rule, not a schema one).
     is_private = db.Column(db.Boolean, nullable=False, default=False)
 
+    # Which (user, activity_type) "cycle" this submission was made in - see
+    # ActivityCycle below. Stamped once at submission time (base.py's
+    # generic submit()) and never changed afterwards, so a later Play
+    # Again never rewrites history - it only changes what counts as
+    # "already answered" for *future* picks.
+    cycle = db.Column(db.Integer, nullable=False, default=1)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -263,3 +270,31 @@ class ActivityDailySelection(db.Model):
     activity_id = db.Column(db.Integer, db.ForeignKey("activities.id"), nullable=False)
 
     activity = db.relationship("Activity")
+
+
+class ActivityCycle(db.Model):
+    """One row per (user, activity_type): which "pass" through that game's
+    content bank this user is currently on. Powers the cycle-based Play
+    Again on Would You Rather / Know Each Other / Who Would - see
+    app/services/activity_questions.py's get_current_cycle/advance_cycle.
+
+    Deliberately per-user, not per-couple: each partner exhausts (and
+    replays) a game's bank independently, at their own pace - exactly the
+    same "scoped to what a specific user has personally submitted"
+    principle the toggle/mode-selection fix itself is built on, not a
+    separate concept bolted on beside it.
+
+    No row exists until a user's first submission for that activity_type
+    (see base.py's submit()) or their first Play Again - absence means
+    cycle 1, the same as an explicit row with cycle=1 would."""
+
+    __tablename__ = "activity_cycles"
+    __table_args__ = (db.UniqueConstraint("user_id", "activity_type", name="uq_activity_cycle_user_type"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    activity_type = db.Column(db.String(32), nullable=False)
+    cycle = db.Column(db.Integer, nullable=False, default=1)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", backref=db.backref("activity_cycles", lazy="dynamic"))

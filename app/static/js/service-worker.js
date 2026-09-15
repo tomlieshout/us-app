@@ -12,7 +12,7 @@
 // cache only when genuinely offline); everything else stays cache-first
 // for instant loads, since CSS/JS aren't session-sensitive.
 
-const CACHE_NAME = 'us-app-shell-v2';
+const CACHE_NAME = 'us-app-shell-v3';
 const SHELL_ASSETS = [
   '/',
   '/static/css/style.css',
@@ -36,7 +36,8 @@ const SHELL_ASSETS = [
   '/static/js/views/stats.js',
   '/static/js/views/settings.js',
   '/static/js/views/round.js',
-  '/static/js/views/game_history.js',
+  '/static/js/views/past_answers.js',
+  '/static/js/views/game_screen.js',
   '/static/manifest.json',
 ];
 

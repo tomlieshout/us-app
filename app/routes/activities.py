@@ -21,10 +21,12 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
 from app.extensions import db
-from app.models import ActivityContent
+from app.models import Activity, ActivityContent, ActivitySubmission
 from app.services.activities import ActivityValidationError, DuplicateSubmissionError, get_handler
 from app.services.activity_privacy import ActivityAccessDenied, get_owned_activity, serialize_activity
 from app.services.activity_questions import (
+    advance_cycle,
+    bank_has_any_content,
     create_random_activity,
     get_or_create_activity_for_content,
     get_or_create_daily_activity,
@@ -60,18 +62,59 @@ def current_activity():
 @activities_bp.get("/random")
 @login_required
 def random_activity():
+    """The "give me something to answer" fetch behind each game's own
+    screen. Answer Coordination toggle (mode query param):
+      - mode=unanswered (default): any content this user personally
+        hasn't submitted for yet, this cycle. A 404 here means the user
+        has answered everything in the bank this cycle - "bank_exhausted"
+        (distinct from "no_content", which means the type/category simply
+        has nothing configured) so the client can offer Play Again rather
+        than a generic error.
+      - mode=partner_pending: specifically a pending Activity the partner
+        already submitted to and this user hasn't. A 404 here
+        ("no_pending") means there's nothing currently waiting - the
+        client must show that plainly, never silently fall back to
+        mode=unanswered.
+    """
     category = request.args.get("category")
     activity_type = request.args.get("activity_type", "classic_question")
+    mode = request.args.get("mode", "unanswered")
+    if mode not in ("unanswered", "partner_pending"):
+        return jsonify({"error": "validation", "message": "Unknown mode."}), 400
     if category == "spicy" and not spicy_unlocked(current_user.couple):
         return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
 
     activity = create_random_activity(
-        current_user.couple, category=category, activity_type=activity_type,
-        spicy_unlocked_flag=spicy_unlocked(current_user.couple),
+        current_user, current_user.couple, category=category, activity_type=activity_type,
+        spicy_unlocked_flag=spicy_unlocked(current_user.couple), mode=mode,
     )
-    if activity is None:
-        return jsonify({"error": "no_content", "message": "No more content in that category right now."}), 404
-    return jsonify(serialize_activity(activity, current_user))
+    if activity is not None:
+        return jsonify(serialize_activity(activity, current_user))
+
+    if mode == "partner_pending":
+        partner = current_user.couple.other_member(current_user)
+        partner_name = partner.name if partner else "your partner"
+        return jsonify({"error": "no_pending", "message": f"Nothing waiting from {partner_name} right now."}), 404
+
+    if bank_has_any_content(activity_type, category=category, spicy_unlocked_flag=spicy_unlocked(current_user.couple)):
+        return jsonify({"error": "bank_exhausted", "message": "You've answered every question in this bank!"}), 404
+    return jsonify({"error": "no_content", "message": "No more content in that category right now."}), 404
+
+
+@activities_bp.post("/play-again")
+@login_required
+def play_again():
+    """Starts a fresh cycle for this user + activity_type once
+    bank_exhausted has fired: every question becomes eligible again, and
+    the new cycle avoids repeats within itself exactly like the first one
+    did (see activity_questions.advance_cycle). Past submissions/history
+    are untouched."""
+    data = request.get_json(silent=True) or {}
+    activity_type = data.get("activity_type")
+    if not activity_type:
+        return jsonify({"error": "validation", "message": "activity_type is required."}), 400
+    new_cycle = advance_cycle(current_user, activity_type)
+    return jsonify({"activity_type": activity_type, "cycle": new_cycle})
 
 
 @activities_bp.post("/play/<int:question_id>")
@@ -102,31 +145,59 @@ def play_legacy_question(question_id):
 @activities_bp.get("/history")
 @login_required
 def activity_history():
-    """Memories/History page, AND each game's own "Past Rounds" list (via
-    the new activity_type filter) - both are the same underlying feed of a
-    couple's revealed activities, just scoped differently by the caller.
+    """The single "Past Answers" feed behind all four features (Memories
+    History page, and each of Would You Rather / Know Each Other / Who
+    Would's own Past Answers) - scoped by the caller via activity_type,
+    category, and now `view`:
+      - view=mutual (default - matches this route's original, only-ever
+        behaviour): both partners have answered - i.e. revealed.
+      - view=mine: this user has personally answered, whether or not the
+        partner has yet. Includes unrevealed activities.
+      - view=partner: the partner has answered and this user hasn't yet.
+        serialize_activity() (the one and only place an Activity becomes
+        JSON) already omits partner_submission entirely while unrevealed,
+        so these items always carry the question but never the partner's
+        answer - no separate/parallel serialization path needed here.
+
+    With exactly two members per couple, "partner submitted, not yet
+    revealed" already implies "I haven't submitted" (reveal fires the
+    moment both submissions exist), so view=partner needs no extra
+    not-me filter.
 
     Spicy is fully hidden from the unfiltered view while locked - not just
     gated from new access, but excluded from a couple's own past history
     too, per the module-level Spicy visibility policy. Once unlocked,
     Spicy behaves as a normal category and is included like everything
     else. Explicitly requesting the "spicy" category filter still requires
-    spicy_unlocked()."""
-    from app.models import Activity
-
+    spicy_unlocked().
+    """
     page = max(int(request.args.get("page", 1)), 1)
     per_page = min(int(request.args.get("per_page", 20)), 50)
     category = request.args.get("category")
     activity_type = request.args.get("activity_type")
+    view = request.args.get("view", "mutual")
+    if view not in ("mine", "mutual", "partner"):
+        return jsonify({"error": "validation", "message": "Unknown view."}), 400
 
-    # Always join ActivityContent - every game's "Past Rounds" list filters
-    # by activity_type, and the History page's category filter needs it
-    # too. A couple's Activity always has exactly one ActivityContent, so
-    # this inner join never duplicates or drops rows for callers that need
-    # neither filter.
-    query = (
-        current_user.couple.activities.filter(Activity.revealed_at.isnot(None)).join(ActivityContent)
-    )
+    query = current_user.couple.activities.join(ActivityContent)
+    order_col = None
+
+    if view == "mutual":
+        query = query.filter(Activity.revealed_at.isnot(None))
+    elif view == "mine":
+        query = query.join(ActivitySubmission, ActivitySubmission.activity_id == Activity.id).filter(
+            ActivitySubmission.user_id == current_user.id
+        )
+        order_col = ActivitySubmission.created_at.desc()
+    else:  # "partner"
+        partner = current_user.couple.other_member(current_user)
+        if partner is None:
+            return jsonify({"view": view, "activities": [], "page": page, "per_page": per_page, "total": 0, "has_more": False})
+        query = query.join(ActivitySubmission, ActivitySubmission.activity_id == Activity.id).filter(
+            ActivitySubmission.user_id == partner.id,
+            Activity.revealed_at.is_(None),
+        )
+        order_col = ActivitySubmission.created_at.desc()
 
     if category:
         if category == "spicy" and not spicy_unlocked(current_user.couple):
@@ -143,11 +214,15 @@ def activity_history():
 
     total = query.count()
     activities = (
-        query.order_by(Activity.revealed_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+        query.order_by(order_col if order_col is not None else Activity.revealed_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
     )
 
     return jsonify(
         {
+            "view": view,
             "activities": [serialize_activity(a, current_user) for a in activities],
             "page": page,
             "per_page": per_page,

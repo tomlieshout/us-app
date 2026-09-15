@@ -1,0 +1,2743 @@
+diff --git a/app/models/__init__.py b/app/models/__init__.py
+index 673255c..f411589 100644
+--- a/app/models/__init__.py
++++ b/app/models/__init__.py
+@@ -6,7 +6,14 @@ from app.models.answer import Answer
+ from app.models.reaction import Reaction
+ from app.models.comment import Comment
+ from app.models.favourite import Favourite
+-from app.models.activity import Activity, ActivityContent, ActivityDailySelection, ActivitySubmission, ActivityResult
++from app.models.activity import (
++    Activity,
++    ActivityContent,
++    ActivityCycle,
++    ActivityDailySelection,
++    ActivitySubmission,
++    ActivityResult,
++)
+ from app.models.twenty_questions import TwentyQuestionsGame, TwentyQuestionsTurn
+ from app.models.challenge import CoupleChallenge
+ from app.models.appreciation import Appreciation
+@@ -25,6 +32,7 @@ __all__ = [
+     "Favourite",
+     "Activity",
+     "ActivityContent",
++    "ActivityCycle",
+     "ActivityDailySelection",
+     "ActivitySubmission",
+     "ActivityResult",
+diff --git a/app/models/activity.py b/app/models/activity.py
+index 39ff1b1..cf83355 100644
+--- a/app/models/activity.py
++++ b/app/models/activity.py
+@@ -165,6 +165,13 @@ class ActivitySubmission(db.Model):
+     # Answer's, is an application-layer rule, not a schema one).
+     is_private = db.Column(db.Boolean, nullable=False, default=False)
+ 
++    # Which (user, activity_type) "cycle" this submission was made in - see
++    # ActivityCycle below. Stamped once at submission time (base.py's
++    # generic submit()) and never changed afterwards, so a later Play
++    # Again never rewrites history - it only changes what counts as
++    # "already answered" for *future* picks.
++    cycle = db.Column(db.Integer, nullable=False, default=1)
++
+     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+ 
+@@ -263,3 +270,31 @@ class ActivityDailySelection(db.Model):
+     activity_id = db.Column(db.Integer, db.ForeignKey("activities.id"), nullable=False)
+ 
+     activity = db.relationship("Activity")
++
++
++class ActivityCycle(db.Model):
++    """One row per (user, activity_type): which "pass" through that game's
++    content bank this user is currently on. Powers the cycle-based Play
++    Again on Would You Rather / Know Each Other / Who Would - see
++    app/services/activity_questions.py's get_current_cycle/advance_cycle.
++
++    Deliberately per-user, not per-couple: each partner exhausts (and
++    replays) a game's bank independently, at their own pace - exactly the
++    same "scoped to what a specific user has personally submitted"
++    principle the toggle/mode-selection fix itself is built on, not a
++    separate concept bolted on beside it.
++
++    No row exists until a user's first submission for that activity_type
++    (see base.py's submit()) or their first Play Again - absence means
++    cycle 1, the same as an explicit row with cycle=1 would."""
++
++    __tablename__ = "activity_cycles"
++    __table_args__ = (db.UniqueConstraint("user_id", "activity_type", name="uq_activity_cycle_user_type"),)
++
++    id = db.Column(db.Integer, primary_key=True)
++    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
++    activity_type = db.Column(db.String(32), nullable=False)
++    cycle = db.Column(db.Integer, nullable=False, default=1)
++    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
++
++    user = db.relationship("User", backref=db.backref("activity_cycles", lazy="dynamic"))
+diff --git a/app/routes/activities.py b/app/routes/activities.py
+index 63ef060..ef6c5ea 100644
+--- a/app/routes/activities.py
++++ b/app/routes/activities.py
+@@ -21,10 +21,12 @@ from flask import Blueprint, jsonify, request
+ from flask_login import current_user, login_required
+ 
+ from app.extensions import db
+-from app.models import ActivityContent
++from app.models import Activity, ActivityContent, ActivitySubmission
+ from app.services.activities import ActivityValidationError, DuplicateSubmissionError, get_handler
+ from app.services.activity_privacy import ActivityAccessDenied, get_owned_activity, serialize_activity
+ from app.services.activity_questions import (
++    advance_cycle,
++    bank_has_any_content,
+     create_random_activity,
+     get_or_create_activity_for_content,
+     get_or_create_daily_activity,
+@@ -60,18 +62,59 @@ def current_activity():
+ @activities_bp.get("/random")
+ @login_required
+ def random_activity():
++    """The "give me something to answer" fetch behind each game's own
++    screen. Answer Coordination toggle (mode query param):
++      - mode=unanswered (default): any content this user personally
++        hasn't submitted for yet, this cycle. A 404 here means the user
++        has answered everything in the bank this cycle - "bank_exhausted"
++        (distinct from "no_content", which means the type/category simply
++        has nothing configured) so the client can offer Play Again rather
++        than a generic error.
++      - mode=partner_pending: specifically a pending Activity the partner
++        already submitted to and this user hasn't. A 404 here
++        ("no_pending") means there's nothing currently waiting - the
++        client must show that plainly, never silently fall back to
++        mode=unanswered.
++    """
+     category = request.args.get("category")
+     activity_type = request.args.get("activity_type", "classic_question")
++    mode = request.args.get("mode", "unanswered")
++    if mode not in ("unanswered", "partner_pending"):
++        return jsonify({"error": "validation", "message": "Unknown mode."}), 400
+     if category == "spicy" and not spicy_unlocked(current_user.couple):
+         return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
+ 
+     activity = create_random_activity(
+-        current_user.couple, category=category, activity_type=activity_type,
+-        spicy_unlocked_flag=spicy_unlocked(current_user.couple),
++        current_user, current_user.couple, category=category, activity_type=activity_type,
++        spicy_unlocked_flag=spicy_unlocked(current_user.couple), mode=mode,
+     )
+-    if activity is None:
+-        return jsonify({"error": "no_content", "message": "No more content in that category right now."}), 404
+-    return jsonify(serialize_activity(activity, current_user))
++    if activity is not None:
++        return jsonify(serialize_activity(activity, current_user))
++
++    if mode == "partner_pending":
++        partner = current_user.couple.other_member(current_user)
++        partner_name = partner.name if partner else "your partner"
++        return jsonify({"error": "no_pending", "message": f"Nothing waiting from {partner_name} right now."}), 404
++
++    if bank_has_any_content(activity_type, category=category, spicy_unlocked_flag=spicy_unlocked(current_user.couple)):
++        return jsonify({"error": "bank_exhausted", "message": "You've answered every question in this bank!"}), 404
++    return jsonify({"error": "no_content", "message": "No more content in that category right now."}), 404
++
++
++@activities_bp.post("/play-again")
++@login_required
++def play_again():
++    """Starts a fresh cycle for this user + activity_type once
++    bank_exhausted has fired: every question becomes eligible again, and
++    the new cycle avoids repeats within itself exactly like the first one
++    did (see activity_questions.advance_cycle). Past submissions/history
++    are untouched."""
++    data = request.get_json(silent=True) or {}
++    activity_type = data.get("activity_type")
++    if not activity_type:
++        return jsonify({"error": "validation", "message": "activity_type is required."}), 400
++    new_cycle = advance_cycle(current_user, activity_type)
++    return jsonify({"activity_type": activity_type, "cycle": new_cycle})
+ 
+ 
+ @activities_bp.post("/play/<int:question_id>")
+@@ -102,31 +145,59 @@ def play_legacy_question(question_id):
+ @activities_bp.get("/history")
+ @login_required
+ def activity_history():
+-    """Memories/History page, AND each game's own "Past Rounds" list (via
+-    the new activity_type filter) - both are the same underlying feed of a
+-    couple's revealed activities, just scoped differently by the caller.
++    """The single "Past Answers" feed behind all four features (Memories
++    History page, and each of Would You Rather / Know Each Other / Who
++    Would's own Past Answers) - scoped by the caller via activity_type,
++    category, and now `view`:
++      - view=mutual (default - matches this route's original, only-ever
++        behaviour): both partners have answered - i.e. revealed.
++      - view=mine: this user has personally answered, whether or not the
++        partner has yet. Includes unrevealed activities.
++      - view=partner: the partner has answered and this user hasn't yet.
++        serialize_activity() (the one and only place an Activity becomes
++        JSON) already omits partner_submission entirely while unrevealed,
++        so these items always carry the question but never the partner's
++        answer - no separate/parallel serialization path needed here.
++
++    With exactly two members per couple, "partner submitted, not yet
++    revealed" already implies "I haven't submitted" (reveal fires the
++    moment both submissions exist), so view=partner needs no extra
++    not-me filter.
+ 
+     Spicy is fully hidden from the unfiltered view while locked - not just
+     gated from new access, but excluded from a couple's own past history
+     too, per the module-level Spicy visibility policy. Once unlocked,
+     Spicy behaves as a normal category and is included like everything
+     else. Explicitly requesting the "spicy" category filter still requires
+-    spicy_unlocked()."""
+-    from app.models import Activity
+-
++    spicy_unlocked().
++    """
+     page = max(int(request.args.get("page", 1)), 1)
+     per_page = min(int(request.args.get("per_page", 20)), 50)
+     category = request.args.get("category")
+     activity_type = request.args.get("activity_type")
+-
+-    # Always join ActivityContent - every game's "Past Rounds" list filters
+-    # by activity_type, and the History page's category filter needs it
+-    # too. A couple's Activity always has exactly one ActivityContent, so
+-    # this inner join never duplicates or drops rows for callers that need
+-    # neither filter.
+-    query = (
+-        current_user.couple.activities.filter(Activity.revealed_at.isnot(None)).join(ActivityContent)
+-    )
++    view = request.args.get("view", "mutual")
++    if view not in ("mine", "mutual", "partner"):
++        return jsonify({"error": "validation", "message": "Unknown view."}), 400
++
++    query = current_user.couple.activities.join(ActivityContent)
++    order_col = None
++
++    if view == "mutual":
++        query = query.filter(Activity.revealed_at.isnot(None))
++    elif view == "mine":
++        query = query.join(ActivitySubmission, ActivitySubmission.activity_id == Activity.id).filter(
++            ActivitySubmission.user_id == current_user.id
++        )
++        order_col = ActivitySubmission.created_at.desc()
++    else:  # "partner"
++        partner = current_user.couple.other_member(current_user)
++        if partner is None:
++            return jsonify({"view": view, "activities": [], "page": page, "per_page": per_page, "total": 0, "has_more": False})
++        query = query.join(ActivitySubmission, ActivitySubmission.activity_id == Activity.id).filter(
++            ActivitySubmission.user_id == partner.id,
++            Activity.revealed_at.is_(None),
++        )
++        order_col = ActivitySubmission.created_at.desc()
+ 
+     if category:
+         if category == "spicy" and not spicy_unlocked(current_user.couple):
+@@ -143,11 +214,15 @@ def activity_history():
+ 
+     total = query.count()
+     activities = (
+-        query.order_by(Activity.revealed_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
++        query.order_by(order_col if order_col is not None else Activity.revealed_at.desc())
++        .offset((page - 1) * per_page)
++        .limit(per_page)
++        .all()
+     )
+ 
+     return jsonify(
+         {
++            "view": view,
+             "activities": [serialize_activity(a, current_user) for a in activities],
+             "page": page,
+             "per_page": per_page,
+diff --git a/app/routes/questions.py b/app/routes/questions.py
+index c4769b9..2d9a42f 100644
+--- a/app/routes/questions.py
++++ b/app/routes/questions.py
+@@ -1,7 +1,8 @@
+ from flask import Blueprint, jsonify, request
+ from flask_login import current_user, login_required
+ 
+-from app.models import ActivityContent, Favourite, Question
++from app.extensions import db
++from app.models import Activity, ActivityContent, ActivitySubmission, Favourite, Question
+ from app.services.privacy import spicy_unlocked
+ from app.services.questions import get_or_create_round_for_question
+ 
+@@ -38,10 +39,33 @@ def categories():
+     return jsonify({"categories": out})
+ 
+ 
++def _answered_question_ids_for(user_id):
++    """Legacy Question ids this specific user has personally submitted an
++    answer for, via the Activity system. Deliberately scoped to the one
++    user, not the couple - the same per-user fix applied to random/toggle
++    content selection (see activity_questions.pick_content_for_user):
++    a question your partner answered isn't "already played" for you until
++    you've actually answered it yourself."""
++    content_ids = {
++        row[0]
++        for row in db.session.query(Activity.content_id)
++        .join(ActivitySubmission, ActivitySubmission.activity_id == Activity.id)
++        .filter(ActivitySubmission.user_id == user_id)
++    }
++    if not content_ids:
++        return set()
++    return {
++        c.payload.get("legacy_question_id")
++        for c in ActivityContent.query.filter(ActivityContent.id.in_(content_ids)).all()
++        if c.payload.get("legacy_question_id") is not None
++    }
++
++
+ @questions_bp.get("")
+ @login_required
+ def list_questions():
+     category = request.args.get("category")
++    unanswered_only = request.args.get("unanswered_only", "").lower() in ("1", "true", "yes")
+     if category == "spicy" and not spicy_unlocked(current_user.couple):
+         return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
+ 
+@@ -58,32 +82,73 @@ def list_questions():
+     favourite_ids = {
+         f.question_id for f in Favourite.query.filter_by(user_id=current_user.id).all()
+     }
+-    # "Already played" now reflects Activity history rather than legacy
+-    # Round history: since the previous phase migrated every existing
+-    # Round into an Activity 1:1, and new plays only ever create
+-    # Activities going forward (see app/routes/activities.py), Activity
+-    # history alone is the complete picture - checking Round here too
+-    # would only ever add duplicates, never anything new.
+-    played_content_ids = {a.content_id for a in current_user.couple.activities.all()}
+-    played_question_ids = {
+-        c.payload.get("legacy_question_id")
+-        for c in ActivityContent.query.filter(ActivityContent.id.in_(played_content_ids)).all()
+-        if c.payload.get("legacy_question_id") is not None
+-    }
++    answered_question_ids = _answered_question_ids_for(current_user.id)
+ 
+-    return jsonify(
++    result = [
+         {
+-            "questions": [
+-                {
+-                    **q.to_dict(),
+-                    "is_favourite": q.id in favourite_ids,
+-                    "already_played": q.id in played_question_ids,
+-                }
+-                for q in questions
+-            ]
++            **q.to_dict(),
++            "is_favourite": q.id in favourite_ids,
++            "already_played": q.id in answered_question_ids,
+         }
++        for q in questions
++    ]
++    if unanswered_only:
++        result = [q for q in result if not q["already_played"]]
++
++    return jsonify({"questions": result})
++
++
++@questions_bp.get("/partner-answered")
++@login_required
++def partner_answered_questions():
++    """Discovery entry point (Browse tab "Partner Answered" card): legacy
++    Questions the couple currently has a pending (unrevealed) Activity for,
++    where the partner has submitted and the current user hasn't - same
++    underlying "pending from partner" concept as the WYR/KEO/WW toggle's
++    mode=partner_pending and the general History page's view=partner, just
++    surfaced here as Question rows so it can render like a normal Browse
++    category list. This is a separate, additional way to find new things
++    to answer - distinct from Browse's existing "unanswered only" filter
++    and from reviewing "Past Answers" history."""
++    couple = current_user.couple
++    partner = couple.other_member(current_user)
++    if partner is None:
++        return jsonify({"questions": []})
++
++    pending_activities = (
++        couple.activities.join(ActivityContent)
++        .join(ActivitySubmission, ActivitySubmission.activity_id == Activity.id)
++        .filter(
++            ActivityContent.activity_type == "classic_question",
++            ActivityContent.active.is_(True),
++            ActivitySubmission.user_id == partner.id,
++            Activity.revealed_at.is_(None),
++        )
++        .all()
+     )
+ 
++    unlocked = spicy_unlocked(couple)
++    favourite_ids = {f.question_id for f in Favourite.query.filter_by(user_id=current_user.id).all()}
++
++    out = []
++    for activity in pending_activities:
++        content = activity.content
++        if content.category == "spicy" and not unlocked:
++            continue
++        legacy_id = content.payload.get("legacy_question_id")
++        if legacy_id is None:
++            continue
++        out.append(
++            {
++                "id": legacy_id,
++                "text": content.prompt,
++                "category": content.category,
++                "is_favourite": legacy_id in favourite_ids,
++            }
++        )
++
++    return jsonify({"questions": out})
++
+ 
+ @questions_bp.post("/<int:question_id>/play")
+ @login_required
+diff --git a/app/services/activities/base.py b/app/services/activities/base.py
+index 89e0844..fda20aa 100644
+--- a/app/services/activities/base.py
++++ b/app/services/activities/base.py
+@@ -19,6 +19,7 @@ from datetime import datetime
+ 
+ from app.extensions import db
+ from app.models import ActivityResult, ActivitySubmission
++from app.services.activity_questions import get_current_cycle
+ 
+ 
+ class ActivityValidationError(Exception):
+@@ -92,6 +93,7 @@ class ActivityHandler:
+             activity_id=activity.id,
+             user_id=user.id,
+             is_private=is_private,
++            cycle=get_current_cycle(user, activity.content.activity_type),
+         )
+         submission.payload = normalized
+         db.session.add(submission)
+diff --git a/app/services/activity_questions.py b/app/services/activity_questions.py
+index 7979b6e..ea71d58 100644
+--- a/app/services/activity_questions.py
++++ b/app/services/activity_questions.py
+@@ -8,12 +8,26 @@ couple_local_today() is intentionally imported from the legacy module
+ rather than duplicated - it only depends on couple.timezone, nothing
+ Round/Question-specific, so there's no reason to have two copies that
+ could drift.
++
++Answer Coordination & cycles (added alongside the toggle/Past Answers
++build): pick_content_for_couple()/get_or_create_daily_activity() are
++UNCHANGED and still couple-wide on purpose - the shared daily pick is
++genuinely one question for the whole couple, and "don't repeat a question
++the couple has already seen today-and-before" is the correct behaviour
++there, not a bug. The bug was specific to create_random_activity(), used
++by each game's own "give me something to answer" flow: it excluded
++content based on whether *any* Activity row existed for it, so once one
++partner answered something, the other could never be served it (and
++could never complete/reveal it) either. pick_content_for_user() is the
++fixed, per-user replacement used there - "already answered" is scoped to
++what *this* user has personally submitted, not what the couple has
++touched at all.
+ """
+ 
+ import random
+ 
+ from app.extensions import db
+-from app.models import Activity, ActivityContent, ActivityDailySelection
++from app.models import Activity, ActivityContent, ActivityCycle, ActivityDailySelection, ActivitySubmission
+ from app.services.questions import couple_local_today  # couple-generic, safe to reuse as-is
+ 
+ __all__ = [
+@@ -21,6 +35,11 @@ __all__ = [
+     "get_or_create_daily_activity",
+     "create_random_activity",
+     "get_or_create_activity_for_content",
++    "get_current_cycle",
++    "advance_cycle",
++    "bank_has_any_content",
++    "pick_content_for_user",
++    "find_partner_pending_activity",
+ ]
+ 
+ 
+@@ -112,30 +131,196 @@ def get_or_create_daily_activity(couple, spicy_unlocked_flag=False, activity_typ
+     return activity
+ 
+ 
+-def create_random_activity(couple, category=None, activity_type="classic_question", spicy_unlocked_flag=False):
+-    content = pick_content_for_couple(couple, activity_type=activity_type, category=category, spicy_unlocked_flag=spicy_unlocked_flag)
++def create_random_activity(user, couple, category=None, activity_type="classic_question", spicy_unlocked_flag=False, mode="unanswered"):
++    """The "give me something to answer" entry point behind each game's
++    own random-fetch screen (and, incidentally, classic_question's
++    "Answer Question" quick action - fixed by the same change, since it
++    goes through this same function).
++
++    mode="unanswered" (default): any content this user personally hasn't
++    submitted for yet, in their current cycle for this activity_type. If
++    the couple already has a pending (unrevealed) Activity for the chosen
++    content - e.g. the partner started it - that SAME Activity is reused
++    (via get_or_create_activity_for_content) rather than a duplicate being
++    created, so submitting completes it immediately. Returns None once
++    every eligible question this cycle has been personally answered.
++
++    mode="partner_pending": specifically an existing pending Activity the
++    partner has already submitted to and this user hasn't - never a fresh
++    pick. Returns None (deliberately, no fallback to "unanswered") if
++    nothing is currently pending from the partner.
++    """
++    if mode == "partner_pending":
++        return find_partner_pending_activity(couple, user, activity_type, spicy_unlocked_flag=spicy_unlocked_flag)
++
++    content = pick_content_for_user(
++        user, couple, activity_type=activity_type, category=category, spicy_unlocked_flag=spicy_unlocked_flag,
++    )
+     if content is None:
+         return None
+-    activity = Activity(couple_id=couple.id, content_id=content.id, is_daily=False)
+-    db.session.add(activity)
+-    db.session.commit()
+-    return activity
++    return get_or_create_activity_for_content(couple, content, for_user=user)
+ 
+ 
+-def get_or_create_activity_for_content(couple, content):
++def get_or_create_activity_for_content(couple, content, for_user=None):
+     """Used when a couple deliberately picks a specific piece of content
+     (Browse screen) rather than getting a random/daily one. Reuses an
+     in-progress (not yet revealed) Activity for the same content instead
+     of spawning duplicates if they re-open it - same behaviour as the
+-    legacy get_or_create_round_for_question."""
+-    existing = (
+-        couple.activities.filter_by(content_id=content.id, revealed_at=None)
+-        .order_by(Activity.created_at.desc())
+-        .first()
+-    )
+-    if existing:
+-        return existing
++    legacy get_or_create_round_for_question.
++
++    for_user (set only by create_random_activity) additionally requires
++    that the reused Activity has no submission from that user yet. This
++    matters once Play Again starts a second cycle: the content becomes
++    eligible again, but the first cycle's Activity may still be sitting
++    unrevealed with this user's own submission on it. Reusing that one
++    would make the submit fail as a duplicate and leave the content
++    permanently "unanswered this cycle" - an endless repeat of the same
++    question. A fresh Activity is the right answer there, and the old
++    one stays exactly as it was, still completable by the partner.
++
++    Browse deliberately does NOT pass for_user: re-opening a question you
++    already answered should show your existing waiting/reveal state, not
++    silently start a second round of the same question."""
++    query = couple.activities.filter_by(content_id=content.id, revealed_at=None)
++    existing = query.order_by(Activity.created_at.desc()).all()
++    for activity in existing:
++        if for_user is not None and activity.submission_for(for_user.id) is not None:
++            continue
++        return activity
+     activity = Activity(couple_id=couple.id, content_id=content.id, is_daily=False)
+     db.session.add(activity)
+     db.session.commit()
+     return activity
++
++
++def get_current_cycle(user, activity_type):
++    """Which pass through activity_type's content bank `user` is
++    currently on. No row in ActivityCycle means cycle 1 - there's no
++    need to eagerly create one just to answer this question."""
++    row = ActivityCycle.query.filter_by(user_id=user.id, activity_type=activity_type).first()
++    return row.cycle if row else 1
++
++
++def advance_cycle(user, activity_type):
++    """Play Again: every question becomes eligible for `user` again,
++    without touching a single existing ActivitySubmission - those stay
++    stamped with the cycle they were actually answered in, so history and
++    scoring for the finished cycle are untouched. Returns the new cycle
++    number."""
++    row = ActivityCycle.query.filter_by(user_id=user.id, activity_type=activity_type).first()
++    if row is None:
++        row = ActivityCycle(user_id=user.id, activity_type=activity_type, cycle=2)
++        db.session.add(row)
++    else:
++        row.cycle += 1
++    db.session.commit()
++    return row.cycle
++
++
++def bank_has_any_content(activity_type, category=None, spicy_unlocked_flag=False):
++    """Whether activity_type/category has ANY eligible content at all,
++    independent of any specific user's progress - lets a caller tell
++    "you've answered everything" (bank_exhausted) apart from "this
++    activity_type/category isn't configured" (no_content)."""
++    query = ActivityContent.query.filter_by(activity_type=activity_type, active=True)
++    if category:
++        if category == "spicy" and not spicy_unlocked_flag:
++            return False
++        query = query.filter_by(category=category)
++    elif not spicy_unlocked_flag:
++        query = query.filter(
++            db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy")
++        )
++    return db.session.query(query.exists()).scalar()
++
++
++def pick_content_for_user(user, couple, activity_type="classic_question", category=None, spicy_unlocked_flag=False, exclude_created_by_user_id=None):
++    """Per-user counterpart to pick_content_for_couple(), used by
++    create_random_activity(). "Already answered" is scoped to
++    (user, activity_type, current cycle) via ActivitySubmission.cycle -
++    see get_current_cycle/advance_cycle above - rather than to whether any
++    Activity row exists for the content at all. This is the actual fix:
++    content the partner has already submitted for is still a perfectly
++    valid pick for this user (get_or_create_activity_for_content will
++    correctly complete their pending Activity instead of duplicating it),
++    it just isn't excluded from the pool anymore for the wrong reason.
++
++    Falling back to "everything" when the per-user pool is empty (the way
++    pick_content_for_couple does) would silently start repeating content
++    without the person ever being told - wrong for a bank with an actual
++    "you've finished it" milestone. Returns None instead, so the caller
++    can distinguish "finished this cycle" from "nothing configured" (see
++    bank_has_any_content) and offer Play Again rather than a quiet repeat.
++    """
++    query = ActivityContent.query.filter_by(activity_type=activity_type, active=True)
++    if category:
++        if category == "spicy" and not spicy_unlocked_flag:
++            return None
++        query = query.filter_by(category=category)
++    elif not spicy_unlocked_flag:
++        query = query.filter(
++            db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy")
++        )
++
++    candidates = query.all()
++    if exclude_created_by_user_id is not None:
++        candidates = [c for c in candidates if c.payload.get("created_by_user_id") != exclude_created_by_user_id]
++    if not candidates:
++        return None
++
++    current_cycle = get_current_cycle(user, activity_type)
++    candidate_ids = [c.id for c in candidates]
++    answered_content_ids = {
++        row[0]
++        for row in db.session.query(Activity.content_id)
++        .join(ActivitySubmission, ActivitySubmission.activity_id == Activity.id)
++        .filter(
++            ActivitySubmission.user_id == user.id,
++            ActivitySubmission.cycle == current_cycle,
++            Activity.content_id.in_(candidate_ids),
++        )
++    }
++    pool = [c for c in candidates if c.id not in answered_content_ids]
++    if not pool:
++        return None
++
++    last_activity = couple.activities.order_by(Activity.created_at.desc()).first()
++    if last_activity and len(pool) > 1:
++        pool = [c for c in pool if c.id != last_activity.content_id] or pool
++
++    return random.choice(pool)
++
++
++def find_partner_pending_activity(couple, user, activity_type, spicy_unlocked_flag=False):
++    """Mode 2 of the Answer Coordination toggle: an existing, unrevealed
++    Activity for this couple + activity_type where the partner has
++    already submitted and `user` hasn't. Returns the SAME Activity (never
++    a new one), so submitting to it completes that pending round right
++    away instead of starting a fresh, unrelated one.
++
++    With exactly two members per couple, "partner submitted and not yet
++    revealed" already implies "I haven't submitted" (reveal fires the
++    moment both submissions exist - see ActivityHandler.reveal), so no
++    extra check for the current user's own submission is needed here."""
++    partner = couple.other_member(user)
++    if partner is None:
++        return None
++
++    candidates = (
++        couple.activities.join(ActivityContent)
++        .filter(
++            Activity.revealed_at.is_(None),
++            ActivityContent.activity_type == activity_type,
++            ActivityContent.active.is_(True),
++        )
++        .all()
++    )
++
++    pending = [
++        activity for activity in candidates
++        if not (activity.content.category == "spicy" and not spicy_unlocked_flag)
++        and activity.submission_for(partner.id) is not None
++    ]
++    if not pending:
++        return None
++    return random.choice(pending)
+diff --git a/app/static/js/api.js b/app/static/js/api.js
+index 3a4a7ed..3f6de39 100644
+--- a/app/static/js/api.js
++++ b/app/static/js/api.js
+@@ -69,7 +69,16 @@ export const api = {
+ 
+   // Questions
+   categories: () => request('GET', '/api/questions/categories'),
+-  questions: (category) => request('GET', `/api/questions${category ? `?category=${encodeURIComponent(category)}` : ''}`),
++  questions: (category, { unansweredOnly } = {}) => {
++    const params = new URLSearchParams();
++    if (category) params.set('category', category);
++    if (unansweredOnly) params.set('unanswered_only', 'true');
++    const qs = params.toString();
++    return request('GET', `/api/questions${qs ? `?${qs}` : ''}`);
++  },
++  // Browse tab's "Waiting On You" discovery card - classic questions the
++  // partner has answered and this user hasn't. Never includes their answer.
++  partnerAnsweredQuestions: () => request('GET', '/api/questions/partner-answered'),
+   playQuestion: (id) => request('POST', `/api/questions/${id}/play`),
+ 
+   // Rounds (legacy engine - kept for rollback safety; the live UI now
+@@ -90,19 +99,31 @@ export const api = {
+   // the architectural-integration phase. See app/routes/activities.py.
+   activities: {
+     current: () => request('GET', '/api/activities/current'),
+-    random: ({ category, activity_type } = {}) => {
++    // mode: 'unanswered' (default) | 'partner_pending' - the Answer
++    // Coordination toggle. See app/routes/activities.py's /random.
++    random: ({ category, activity_type, mode } = {}) => {
+       const params = new URLSearchParams();
+       if (category) params.set('category', category);
+       if (activity_type) params.set('activity_type', activity_type);
++      if (mode) params.set('mode', mode);
+       const qs = params.toString();
+       return request('GET', `/api/activities/random${qs ? `?${qs}` : ''}`);
+     },
++    // Starts one fresh cycle through this game's bank once the user has
++    // personally answered everything in it.
++    playAgain: (activity_type) => request('POST', '/api/activities/play-again', { activity_type }),
+     play: (legacyQuestionId) => request('POST', `/api/activities/play/${legacyQuestionId}`),
+     get: (id) => request('GET', `/api/activities/${id}`),
+     submit: (id, data) => request('POST', `/api/activities/${id}/submit`, data),
+-    history: (page, category) => {
++    // view: 'mine' | 'mutual' (default) | 'partner' - the three-way Past
++    // Answers structure, shared by all four features. Options-object
++    // form: the old positional (page, category) signature silently
++    // dropped the activity_type argument game_history.js was passing.
++    history: ({ page, category, activityType, view } = {}) => {
+       const params = new URLSearchParams({ page: page || 1 });
+       if (category) params.set('category', category);
++      if (activityType) params.set('activity_type', activityType);
++      if (view) params.set('view', view);
+       return request('GET', `/api/activities/history?${params.toString()}`);
+     },
+   },
+diff --git a/app/static/js/service-worker.js b/app/static/js/service-worker.js
+index 921b628..4553c3a 100644
+--- a/app/static/js/service-worker.js
++++ b/app/static/js/service-worker.js
+@@ -12,7 +12,7 @@
+ // cache only when genuinely offline); everything else stays cache-first
+ // for instant loads, since CSS/JS aren't session-sensitive.
+ 
+-const CACHE_NAME = 'us-app-shell-v2';
++const CACHE_NAME = 'us-app-shell-v3';
+ const SHELL_ASSETS = [
+   '/',
+   '/static/css/style.css',
+@@ -36,7 +36,8 @@ const SHELL_ASSETS = [
+   '/static/js/views/stats.js',
+   '/static/js/views/settings.js',
+   '/static/js/views/round.js',
+-  '/static/js/views/game_history.js',
++  '/static/js/views/past_answers.js',
++  '/static/js/views/game_screen.js',
+   '/static/manifest.json',
+ ];
+ 
+diff --git a/app/static/js/views/game_history.js b/app/static/js/views/game_history.js
+deleted file mode 100644
+index 0d14d8b..0000000
+--- a/app/static/js/views/game_history.js
++++ /dev/null
+@@ -1,79 +0,0 @@
+-import { api } from '../api.js';
+-import { showToast } from '../utils.js';
+-
+-/**
+- * Generic "Past Rounds" list for any activity_type built on the reusable
+- * Activity system. Each game file supplies its own renderItem() so the
+- * list can show game-specific detail (Would You Rather's match banner,
+- * Know Each Other's prediction result, Who Would's unanimous/split badge)
+- * while the fetch/pagination/back-button scaffolding lives in one place -
+- * the same "generic mechanics here, type-specific rendering there" split
+- * the Activity system itself already follows (see
+- * services/activities/base.py).
+- *
+- * Usage from a game file:
+- *   renderPastRoundsList(body, {
+- *     activityType: 'would_you_rather',
+- *     title: 'Past Rounds',
+- *     renderItem: (activity) => { ...build and return a DOM element... },
+- *     onBack: () => loadNext(body),
+- *   });
+- */
+-export function renderPastRoundsList(body, { activityType, title, renderItem, onBack }) {
+-  body.innerHTML = '';
+-
+-  const header = document.createElement('div');
+-  header.className = 'back-row';
+-  header.innerHTML = `<button class="icon-btn" id="pr-back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>`;
+-  body.appendChild(header);
+-  header.querySelector('#pr-back').addEventListener('click', onBack);
+-
+-  const heading = document.createElement('h2');
+-  heading.style.cssText = 'font-size:19px;margin:4px 0 14px;';
+-  heading.textContent = title || 'Past Rounds';
+-  body.appendChild(heading);
+-
+-  const list = document.createElement('div');
+-  list.id = 'pr-list';
+-  body.appendChild(list);
+-
+-  const moreBtn = document.createElement('button');
+-  moreBtn.className = 'btn btn-ghost btn-block mt-16 hidden';
+-  moreBtn.textContent = 'Load more';
+-  body.appendChild(moreBtn);
+-
+-  let page = 1;
+-
+-  async function load(reset) {
+-    if (reset) {
+-      list.innerHTML = '<div class="skeleton" style="height:100px;margin-bottom:10px;"></div>'.repeat(3);
+-    }
+-    let data;
+-    try {
+-      data = await api.activities.history(page, undefined, activityType);
+-    } catch (err) {
+-      showToast(err.message);
+-      return;
+-    }
+-    if (reset) list.innerHTML = '';
+-
+-    if (data.activities.length === 0 && page === 1) {
+-      list.innerHTML = `
+-        <div class="empty-state">
+-          <div class="empty-emoji">📜</div>
+-          <h3>No past rounds yet</h3>
+-          <p>Play a round together and it'll show up here once you've both answered.</p>
+-        </div>
+-      `;
+-      moreBtn.classList.add('hidden');
+-      return;
+-    }
+-
+-    data.activities.forEach((a) => list.appendChild(renderItem(a)));
+-    moreBtn.classList.toggle('hidden', !data.has_more);
+-  }
+-
+-  moreBtn.addEventListener('click', () => { page += 1; load(false); });
+-
+-  load(true);
+-}
+diff --git a/app/static/js/views/game_screen.js b/app/static/js/views/game_screen.js
+new file mode 100644
+index 0000000..acd4687
+--- /dev/null
++++ b/app/static/js/views/game_screen.js
+@@ -0,0 +1,186 @@
++import { api } from '../api.js';
++import { escapeHtml, showToast } from '../utils.js';
++import { partnerMember } from '../state.js';
++import { renderPastAnswers } from './past_answers.js';
++
++/**
++ * The shared shell for Would You Rather, Know Each Other and Who Would.
++ *
++ * Everything these three games do identically lives here once: the
++ * Answer Coordination toggle, fetching the next activity in the selected
++ * mode, the bank-exhausted completion state with Play Again, and the
++ * link into the three-way Past Answers view. Each game passes in only
++ * the parts that are genuinely game-specific (how to render a round, how
++ * to render a past mutual round, how to describe its own submission) -
++ * the same generic-vs-type-specific split as
++ * app/services/activities/base.py.
++ *
++ * Toggle modes (mirrors /api/activities/random's `mode`):
++ *   unanswered       - anything I personally haven't answered this cycle.
++ *   partner_pending  - specifically something my partner has already
++ *                      answered, so answering completes it and reveals
++ *                      right away. Never silently falls back to the other
++ *                      mode: if nothing is waiting, it says so.
++ */
++
++const MODES = [
++  { key: 'unanswered', label: 'Unanswered' },
++  { key: 'partner_pending', label: "Partner's answered" },
++];
++
++export function createGameScreen(body, {
++  activityType,
++  pastAnswersTitle = 'Past Answers',
++  skeletonHeight = 260,
++  renderActivity,
++  renderMutual,
++  describeMine,
++  completion = {},
++}) {
++  let mode = 'unanswered';
++
++  const chrome = document.createElement('div');
++  const slot = document.createElement('div');
++
++  function mountChrome() {
++    chrome.innerHTML = '';
++
++    const toggleRow = document.createElement('div');
++    toggleRow.style.cssText = 'display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;';
++    toggleRow.setAttribute('role', 'tablist');
++    MODES.forEach((m) => {
++      const chip = document.createElement('button');
++      chip.type = 'button';
++      chip.className = `chip ${m.key === mode ? '' : 'chip-muted'}`;
++      chip.style.cssText = 'white-space:nowrap;border:none;';
++      chip.dataset.mode = m.key;
++      chip.textContent = m.label;
++      chip.setAttribute('role', 'tab');
++      chip.setAttribute('aria-selected', m.key === mode ? 'true' : 'false');
++      chip.addEventListener('click', () => {
++        if (mode === m.key) return;
++        mode = m.key;
++        loadNext();
++      });
++      toggleRow.appendChild(chip);
++    });
++    chrome.appendChild(toggleRow);
++
++    const pastLink = document.createElement('button');
++    pastLink.type = 'button';
++    pastLink.className = 'btn btn-ghost btn-block mt-8';
++    pastLink.textContent = '📜 Past Answers';
++    pastLink.addEventListener('click', () => openPastAnswers());
++    chrome.appendChild(pastLink);
++  }
++
++  function shell() {
++    body.innerHTML = '';
++    mountChrome();
++    body.appendChild(chrome);
++    body.appendChild(slot);
++  }
++
++  function skeleton() {
++    slot.innerHTML = `<div class="skeleton mt-16" style="height:${skeletonHeight}px;"></div>`;
++  }
++
++  function message(emoji, heading, text, actions = []) {
++    slot.innerHTML = '';
++    const wrap = document.createElement('div');
++    wrap.className = 'empty-state';
++    wrap.innerHTML = `
++      <div class="empty-emoji">${emoji}</div>
++      <h3>${escapeHtml(heading)}</h3>
++      <p>${escapeHtml(text)}</p>
++    `;
++    actions.forEach(({ label, className, onClick }) => {
++      const btn = document.createElement('button');
++      btn.className = `btn ${className || 'btn-primary'} btn-block mt-16`;
++      btn.textContent = label;
++      btn.addEventListener('click', onClick);
++      wrap.appendChild(btn);
++    });
++    slot.appendChild(wrap);
++  }
++
++  function showBankExhausted() {
++    message(
++      completion.emoji || '🎉',
++      completion.heading || "You've answered every question!",
++      completion.body || "That's the whole bank. Start a fresh round of them, or leave it here for now.",
++      [
++        {
++          label: 'Play Again',
++          onClick: async () => {
++            try {
++              await api.activities.playAgain(activityType);
++            } catch (err) {
++              showToast(err.message || "Couldn't start a new round.");
++              return;
++            }
++            loadNext();
++          },
++        },
++        { label: 'Leave it for now', className: 'btn-ghost', onClick: () => showPastAnswersOrClose() },
++      ],
++    );
++  }
++
++  function showPastAnswersOrClose() {
++    // "Leave it" shouldn't dead-end on the same completion screen, and
++    // shouldn't close the sheet out from under the person either - the
++    // most useful neighbouring thing is their own history.
++    openPastAnswers();
++  }
++
++  function showNothingPending() {
++    const partner = partnerMember();
++    message(
++      '📭',
++      'Nothing to catch up on',
++      `Nothing waiting from ${partner ? partner.name : 'your partner'} right now.`,
++      [
++        {
++          label: 'Show unanswered questions instead',
++          onClick: () => { mode = 'unanswered'; loadNext(); },
++        },
++      ],
++    );
++  }
++
++  function openPastAnswers() {
++    renderPastAnswers(body, {
++      activityType,
++      title: pastAnswersTitle,
++      renderMutual,
++      describeMine,
++      onBack: () => loadNext(),
++      onOpenActivity: (activity) => showActivity(activity),
++    });
++  }
++
++  async function loadNext() {
++    shell();
++    skeleton();
++
++    let activity;
++    try {
++      activity = await api.activities.random({ activity_type: activityType, mode });
++    } catch (err) {
++      if (err.code === 'bank_exhausted') return showBankExhausted();
++      if (err.code === 'no_pending') return showNothingPending();
++      slot.innerHTML = `<p class="text-muted" style="padding:30px 0;text-align:center;">${escapeHtml(err.message)}</p>`;
++      return;
++    }
++    renderActivity(slot, activity, screenApi);
++  }
++
++  function showActivity(activity) {
++    shell();
++    renderActivity(slot, activity, screenApi);
++  }
++
++  const screenApi = { loadNext, showActivity, openPastAnswers };
++  return screenApi;
++}
+diff --git a/app/static/js/views/history.js b/app/static/js/views/history.js
+index b930639..eb8caef 100644
+--- a/app/static/js/views/history.js
++++ b/app/static/js/views/history.js
+@@ -1,8 +1,27 @@
+ import { api } from '../api.js';
+ import { escapeHtml, showToast, categoryEmoji, formatRelativeDate } from '../utils.js';
+-import { isSpicyUnlocked } from '../state.js';
++import { isSpicyUnlocked, partnerMember } from '../state.js';
+ import { openActivityModal } from './round.js';
+ 
++/**
++ * The general History page - now the same three-way "Past Answers"
++ * structure the three games use (see views/past_answers.js), on top of
++ * the category filters this page already had:
++ *   Mine      - questions I've personally answered, mine shown.
++ *   Mutual    - questions we've both answered (this page's original,
++ *               only-ever view).
++ *   Partner's - questions my partner has answered that I haven't. The
++ *               question is shown so I can go answer it; their answer is
++ *               never included in the response until I've submitted my
++ *               own (app/services/activity_privacy.py), and this view
++ *               renders nothing but the prompt regardless.
++ *
++ * It doesn't reuse renderPastAnswers() itself because this page is a
++ * full view with category filters rather than a sheet, but both go
++ * through the same GET /api/activities/history?view= endpoint - the
++ * shared mechanism is the endpoint, not the widget.
++ */
++
+ const FILTERS = [
+   { key: '', label: 'All' },
+   { key: 'relationship', label: '❤️ Relationship' },
+@@ -14,20 +33,61 @@ const FILTERS = [
+   { key: 'longdistance', label: '🌍 Distance' },
+ ];
+ 
++const VIEWS = [
++  { key: 'mine', label: 'Mine' },
++  { key: 'mutual', label: 'Mutual' },
++  { key: 'partner', label: "Partner's" },
++];
++
+ export async function renderHistory(container) {
+   const filters = isSpicyUnlocked() ? [...FILTERS, { key: 'spicy', label: '🔥 Spicy' }] : FILTERS;
+   let activeFilter = '';
++  let view = 'mutual';
+   let page = 1;
+ 
+   container.innerHTML = `
+-    <h1 class="page-title">History</h1>
+-    <p class="page-subtitle">Your private collection of revealed questions.</p>
++    <h1 class="page-title">Past Answers</h1>
++    <p class="page-subtitle" id="mem-subtitle"></p>
++    <div id="mem-views" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;" role="tablist"></div>
+     <div id="mem-filters" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;"></div>
+     <div id="mem-list"></div>
+     <button class="btn btn-ghost btn-block mt-16 hidden" id="mem-more">Load more</button>
+   `;
+ 
++  const subtitle = container.querySelector('#mem-subtitle');
++  const viewRow = container.querySelector('#mem-views');
+   const filterRow = container.querySelector('#mem-filters');
++  const list = container.querySelector('#mem-list');
++  const moreBtn = container.querySelector('#mem-more');
++
++  const SUBTITLES = {
++    mine: 'Everything you\'ve answered, whether or not they have yet.',
++    mutual: 'Your private collection of revealed questions.',
++    partner: 'Questions waiting on you — answer one to see what they said.',
++  };
++
++  VIEWS.forEach((v) => {
++    const chip = document.createElement('button');
++    chip.className = `chip ${v.key === view ? '' : 'chip-muted'}`;
++    chip.style.cssText = 'white-space:nowrap;border:none;';
++    chip.dataset.view = v.key;
++    chip.textContent = v.label;
++    chip.setAttribute('role', 'tab');
++    chip.addEventListener('click', () => {
++      if (view === v.key) return;
++      view = v.key;
++      page = 1;
++      Array.from(viewRow.children).forEach((c) => {
++        c.classList.toggle('chip-muted', c.dataset.view !== view);
++        c.setAttribute('aria-selected', c.dataset.view === view ? 'true' : 'false');
++      });
++      subtitle.textContent = SUBTITLES[view];
++      load(true);
++    });
++    viewRow.appendChild(chip);
++  });
++  subtitle.textContent = SUBTITLES[view];
++
+   filters.forEach((f) => {
+     const chip = document.createElement('button');
+     chip.className = `chip ${f.key === activeFilter ? '' : 'chip-muted'}`;
+@@ -45,35 +105,41 @@ export async function renderHistory(container) {
+     filterRow.appendChild(chip);
+   });
+ 
+-  const list = container.querySelector('#mem-list');
+-  const moreBtn = container.querySelector('#mem-more');
++  function emptyState() {
++    const partner = partnerMember();
++    const partnerName = partner ? escapeHtml(partner.name) : 'your partner';
++    const copy = {
++      mine: { emoji: '✍️', heading: 'Nothing answered yet', body: 'Answer your first question and it\'ll show up here straight away.' },
++      mutual: { emoji: '💭', heading: 'Your history will appear here', body: 'Answer your first question together to start building it.' },
++      // Framed as "nothing to catch up on" - never as a comment on how
++      // much either of them has played.
++      partner: { emoji: '📭', heading: 'Nothing to catch up on', body: `Nothing waiting from ${partnerName} right now.` },
++    }[view];
++    return `<div class="empty-state"><div class="empty-emoji">${copy.emoji}</div><h3>${copy.heading}</h3><p>${copy.body}</p></div>`;
++  }
+ 
+   async function load(reset) {
+     if (reset) {
+       list.innerHTML = '<div class="skeleton" style="height:100px;margin-bottom:10px;"></div>'.repeat(3);
++      moreBtn.classList.add('hidden');
+     }
+     let data;
+     try {
+-      data = await api.activities.history(page, activeFilter || undefined);
++      data = await api.activities.history({ page, category: activeFilter || undefined, view });
+     } catch (err) {
+       showToast(err.message);
++      if (reset) list.innerHTML = '';
+       return;
+     }
+     if (reset) list.innerHTML = '';
+ 
+     if (data.activities.length === 0 && page === 1) {
+-      list.innerHTML = `
+-        <div class="empty-state">
+-          <div class="empty-emoji">💭</div>
+-          <h3>Your history will appear here</h3>
+-          <p>Answer your first question together to start building it.</p>
+-        </div>
+-      `;
++      list.innerHTML = emptyState();
+       moreBtn.classList.add('hidden');
+       return;
+     }
+ 
+-    data.activities.forEach((a) => list.appendChild(historyCard(a)));
++    data.activities.forEach((a) => list.appendChild(historyCard(a, view)));
+     moreBtn.classList.toggle('hidden', !data.has_more);
+   }
+ 
+@@ -82,22 +148,34 @@ export async function renderHistory(container) {
+   load(true);
+ }
+ 
+-function historyCard(activity) {
++function historyCard(activity, view) {
+   const card = document.createElement('button');
+   card.className = 'card card-tap';
+   card.style.display = 'block';
+   card.style.width = '100%';
+   card.style.textAlign = 'left';
++
++  // Only ever my own submission is previewed. In the "Partner's" view
++  // there is no partner submission in the payload at all - the server
++  // omits it pre-reveal - and nothing here goes looking for one.
+   const submission = activity.my_submission;
+   const preview = submission && !submission.is_private
+     ? truncate(submission.payload.answer_text ?? submission.payload.answer_option, 60)
+     : null;
++
++  const note = {
++    mine: activity.revealed ? null : 'Waiting on your partner to answer.',
++    mutual: null,
++    partner: 'Answer this to see what they said.',
++  }[view];
++
+   card.innerHTML = `
+     <div class="status-row" style="margin-bottom:6px;">
+       <span class="chip chip-muted">${categoryEmoji(activity.content.category)} ${formatRelativeDate(activity.created_at)}</span>
+     </div>
+     <p style="font-weight:600;font-size:15px;line-height:1.4;">${escapeHtml(activity.content.prompt)}</p>
+     ${preview ? `<p class="text-muted small mt-8">"${escapeHtml(preview)}"</p>` : ''}
++    ${note ? `<p class="text-muted small mt-8">${escapeHtml(note)}</p>` : ''}
+   `;
+   card.addEventListener('click', () => openActivityModal(activity.activity_id));
+   return card;
+diff --git a/app/static/js/views/know_each_other.js b/app/static/js/views/know_each_other.js
+index 0d8de7c..29486cc 100644
+--- a/app/static/js/views/know_each_other.js
++++ b/app/static/js/views/know_each_other.js
+@@ -1,50 +1,57 @@
+ import { api } from '../api.js';
+ import { escapeHtml, openModal, showToast } from '../utils.js';
+ import { meMember, partnerMember } from '../state.js';
++import { createGameScreen } from './game_screen.js';
+ 
+-/** Opens the Know Each Other sheet. With no argument, fetches a fresh
+- * random activity (existing behaviour, unchanged). Passed a pre-fetched
++/** Opens the Know Each Other sheet. With no argument, fetches the next
++ * activity in whichever toggle mode is selected. Passed a pre-fetched
+  * activity (e.g. Home's daily pick), opens that specific one first
+- * instead - same pattern as wyr.js's openWyrGame. */
++ * instead - same pattern as wyr.js's openWyrGame.
++ *
++ * Toggle, completion/Play Again and Past Answers all come from
++ * createGameScreen (game_screen.js); this file supplies only the
++ * Know-Each-Other-specific rendering. */
+ export function openKnowEachOtherGame(initialActivity = null) {
+   const { body } = openModal('round-modal', { title: 'Know Each Other', render: () => '<div class="skeleton" style="height:300px;"></div>' });
++
++  const screen = createGameScreen(body, {
++    activityType: 'know_each_other',
++    skeletonHeight: 300,
++    renderActivity,
++    renderMutual: renderPastMutual,
++    describeMine,
++    completion: {
++      emoji: '🧠',
++      heading: "You've answered every Know Each Other question!",
++      body: "That's the whole bank. Start a fresh round of them, or leave it here for now.",
++    },
++  });
++
+   if (initialActivity) {
+-    render(body, initialActivity);
++    screen.showActivity(initialActivity);
+   } else {
+-    loadNext(body);
+-  }
+-}
+-
+-async function loadNext(body) {
+-  body.innerHTML = '<div class="skeleton" style="height:300px;"></div>';
+-  let activity;
+-  try {
+-    activity = await api.activities.random({ activity_type: 'know_each_other' });
+-  } catch (err) {
+-    body.innerHTML = `<p class="text-muted" style="padding:30px 0;text-align:center;">${escapeHtml(err.message)}</p>`;
+-    return;
++    screen.loadNext();
+   }
+-  render(body, activity);
+ }
+ 
+-function render(body, activity) {
+-  body.innerHTML = '';
++function renderActivity(slot, activity, screen) {
++  slot.innerHTML = '';
+   if (!activity.my_submitted) {
+-    body.appendChild(renderForm(activity, body));
++    slot.appendChild(renderForm(activity, screen));
+   } else if (!activity.revealed) {
+-    body.appendChild(renderWaiting());
++    slot.appendChild(renderWaiting(screen));
+   } else {
+-    body.appendChild(renderReveal(activity, body));
++    slot.appendChild(renderReveal(activity, screen));
+   }
+ }
+ 
+-function renderForm(activity, body) {
++function renderForm(activity, screen) {
+   const wrap = document.createElement('div');
+   const { question_type, options, predict_text } = activity.content.payload;
+   const selection = { answer_option: null, predicted_option: null };
+ 
+   const header = document.createElement('h2');
+-  header.style.cssText = 'font-size:19px;line-height:1.35;margin-bottom:16px;';
++  header.style.cssText = 'font-size:19px;line-height:1.35;margin:16px 0;';
+   header.textContent = activity.content.prompt;
+   wrap.appendChild(header);
+ 
+@@ -68,9 +75,15 @@ function renderForm(activity, body) {
+     submitBtn.disabled = true;
+     submitBtn.textContent = 'Submitting…';
+     try {
+-      await api.activities.submit(activity.activity_id, selection);
++      const updated = await api.activities.submit(activity.activity_id, selection);
+       showToast('Locked in ✓');
+-      loadNext(body);
++      // Completing a round the partner had already answered reveals
++      // immediately - show it rather than skipping past the reveal.
++      if (updated && updated.revealed) {
++        screen.showActivity(updated);
++      } else {
++        screen.loadNext();
++      }
+     } catch (err) {
+       showToast(err.message || 'Could not submit.');
+       submitBtn.disabled = false;
+@@ -125,7 +138,7 @@ function optionPicker(questionType, options, onSelect) {
+   return list;
+ }
+ 
+-function renderWaiting() {
++function renderWaiting(screen) {
+   const wrap = document.createElement('div');
+   const partner = partnerMember();
+   wrap.innerHTML = `
+@@ -138,10 +151,30 @@ function renderWaiting() {
+       </p>
+     </div>
+   `;
++  const nextBtn = document.createElement('button');
++  nextBtn.className = 'btn btn-primary btn-block mt-16';
++  nextBtn.textContent = 'Next Question';
++  nextBtn.addEventListener('click', () => screen.loadNext());
++  wrap.appendChild(nextBtn);
+   return wrap;
+ }
+ 
+-function renderReveal(activity, body) {
++function renderReveal(activity, screen) {
++  const wrap = document.createElement('div');
++  wrap.appendChild(revealBody(activity));
++
++  const nextBtn = document.createElement('button');
++  nextBtn.className = 'btn btn-primary btn-block mt-16';
++  nextBtn.textContent = 'Next Question';
++  nextBtn.addEventListener('click', () => screen.loadNext());
++  wrap.appendChild(nextBtn);
++
++  return wrap;
++}
++
++/** The reveal itself with no navigation attached - shared by the live
++ * reveal screen and Past Answers' "Mutual" tab. */
++function revealBody(activity) {
+   const wrap = document.createElement('div');
+   const me = meMember();
+   const partner = partnerMember();
+@@ -150,7 +183,7 @@ function renderReveal(activity, body) {
+   const theirs = partner && predictions[String(partner.id)];
+ 
+   const header = document.createElement('h2');
+-  header.style.cssText = 'font-size:19px;line-height:1.35;margin-bottom:16px;';
++  header.style.cssText = 'font-size:19px;line-height:1.35;margin:16px 0;';
+   header.textContent = activity.content.prompt;
+   wrap.appendChild(header);
+ 
+@@ -164,15 +197,28 @@ function renderReveal(activity, body) {
+     wrap.appendChild(predictionResult(partner ? partner.name : 'Partner', theirs, false));
+   }
+ 
+-  const nextBtn = document.createElement('button');
+-  nextBtn.className = 'btn btn-primary btn-block mt-16';
+-  nextBtn.textContent = 'Next Question';
+-  nextBtn.addEventListener('click', () => loadNext(body));
+-  wrap.appendChild(nextBtn);
+-
+   return wrap;
+ }
+ 
++function renderPastMutual(activity) {
++  const card = document.createElement('div');
++  card.className = 'card mt-8';
++  card.style.padding = '14px';
++  card.appendChild(revealBody(activity));
++  return card;
++}
++
++/** One-line summary of my own answer, for the "Mine" tab - which
++ * includes rounds the partner hasn't answered yet, so this must never
++ * read anything but my own submission. My prediction is intentionally
++ * not shown: it's about them, and showing it before the reveal would
++ * spoil my own result. */
++function describeMine(activity) {
++  const sub = activity.my_submission;
++  if (!sub || !sub.payload || !sub.payload.answer_option) return '';
++  return `Your answer: ${sub.payload.answer_option}`;
++}
++
+ function revealRow(name, value, color) {
+   const card = document.createElement('div');
+   card.className = 'reveal-answer-card';
+@@ -187,7 +233,7 @@ function predictionResult(name, prediction, mine) {
+   const good = prediction.points > 0;
+   const el = document.createElement('div');
+   el.className = `prediction-result ${good ? 'correct' : 'incorrect'}`;
+-  const verb = mine ? 'You' : escapeHtml(name);
+-  el.textContent = `${good ? '🎯' : '🤔'} ${verb} guessed "${escapeHtml(prediction.predicted)}" — +${prediction.points} point${prediction.points === 1 ? '' : 's'}.`;
++  const verb = mine ? 'You' : name;
++  el.textContent = `${good ? '🎯' : '🤔'} ${verb} guessed "${prediction.predicted}" — +${prediction.points} point${prediction.points === 1 ? '' : 's'}.`;
+   return el;
+ }
+diff --git a/app/static/js/views/past_answers.js b/app/static/js/views/past_answers.js
+new file mode 100644
+index 0000000..4c11caa
+--- /dev/null
++++ b/app/static/js/views/past_answers.js
+@@ -0,0 +1,183 @@
++import { api } from '../api.js';
++import { escapeHtml, showToast } from '../utils.js';
++import { partnerMember } from '../state.js';
++
++/**
++ * "Past Answers" - the three-way history view, shared by Would You
++ * Rather, Know Each Other, Who Would, and the general History page.
++ * Replaces the earlier single-view "Past Rounds" list (game_history.js).
++ *
++ * Three switchable views, all served by the same GET
++ * /api/activities/history endpoint (see app/routes/activities.py) rather
++ * than four separate implementations:
++ *   Mine     - questions I've personally answered, whether or not my
++ *              partner has yet.
++ *   Mutual   - questions we've both answered, shown like the reveal screen.
++ *   Partner's- questions my partner has answered that I haven't. The
++ *              question is shown so I can go answer it; their answer is
++ *              never here, because the server never sends it pre-reveal
++ *              (serialize_activity simply omits partner_submission). This
++ *              view renders only fields that are always present, so there
++ *              is no client-side path that could display it either.
++ *
++ * The generic/type-specific split mirrors services/activities/base.py:
++ * fetch, tabs, pagination and the Partner's view live here once; each
++ * caller supplies renderMutual()/describeMine() for its own game's detail.
++ */
++
++const VIEWS = [
++  { key: 'mine', label: 'Mine' },
++  { key: 'mutual', label: 'Mutual' },
++  { key: 'partner', label: "Partner's" },
++];
++
++export function renderPastAnswers(body, {
++  activityType,
++  title = 'Past Answers',
++  renderMutual,
++  describeMine,
++  onBack,
++  onOpenActivity,
++  initialView = 'mine',
++}) {
++  body.innerHTML = '';
++
++  const header = document.createElement('div');
++  header.className = 'back-row';
++  header.innerHTML = `<button class="icon-btn" id="pa-back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>`;
++  body.appendChild(header);
++  header.querySelector('#pa-back').addEventListener('click', onBack);
++
++  const heading = document.createElement('h2');
++  heading.style.cssText = 'font-size:19px;margin:4px 0 14px;';
++  heading.textContent = title;
++  body.appendChild(heading);
++
++  const tabs = document.createElement('div');
++  tabs.style.cssText = 'display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;';
++  tabs.setAttribute('role', 'tablist');
++  body.appendChild(tabs);
++
++  const list = document.createElement('div');
++  list.className = 'mt-16';
++  body.appendChild(list);
++
++  const moreBtn = document.createElement('button');
++  moreBtn.className = 'btn btn-ghost btn-block mt-16 hidden';
++  moreBtn.textContent = 'Load more';
++  body.appendChild(moreBtn);
++
++  let view = initialView;
++  let page = 1;
++
++  VIEWS.forEach((v) => {
++    const btn = document.createElement('button');
++    btn.type = 'button';
++    btn.className = 'chip';
++    btn.style.cssText = 'white-space:nowrap;border:none;';
++    btn.dataset.view = v.key;
++    btn.textContent = v.label;
++    btn.setAttribute('role', 'tab');
++    btn.addEventListener('click', () => {
++      if (view === v.key) return;
++      view = v.key;
++      page = 1;
++      syncTabs();
++      load(true);
++    });
++    tabs.appendChild(btn);
++  });
++
++  function syncTabs() {
++    tabs.querySelectorAll('.chip').forEach((b) => {
++      const active = b.dataset.view === view;
++      b.classList.toggle('chip-muted', !active);
++      b.setAttribute('aria-selected', active ? 'true' : 'false');
++    });
++  }
++
++  function emptyState() {
++    const partner = partnerMember();
++    const partnerName = partner ? escapeHtml(partner.name) : 'Your partner';
++    const copy = {
++      mine: { emoji: '✍️', heading: 'Nothing answered yet', body: 'Answer a question and it\'ll show up here straight away.' },
++      mutual: { emoji: '💞', heading: 'Nothing revealed yet', body: 'Once you\'ve both answered the same question, it\'ll appear here.' },
++      // Deliberately framed as "nothing to catch up on", never as a
++      // comment on how much either partner has or hasn't played.
++      partner: { emoji: '📭', heading: 'Nothing to catch up on', body: `Nothing waiting from ${partnerName} right now.` },
++    }[view];
++    return `<div class="empty-state"><div class="empty-emoji">${copy.emoji}</div><h3>${copy.heading}</h3><p>${copy.body}</p></div>`;
++  }
++
++  function renderMineItem(activity) {
++    const card = document.createElement('div');
++    card.className = 'card mt-8';
++    card.style.padding = '14px';
++    const summary = describeMine ? describeMine(activity) : '';
++    card.innerHTML = `
++      <p class="qtext">${escapeHtml(activity.content.prompt)}</p>
++      ${summary ? `<p class="text-muted small mt-8">${escapeHtml(summary)}</p>` : ''}
++      ${activity.revealed ? '' : '<p class="text-muted small mt-8">Waiting on your partner to answer.</p>'}
++    `;
++    return card;
++  }
++
++  function renderPartnerItem(activity) {
++    // Renders the question only. There is no partner answer in this
++    // payload to render even if we wanted to - the server omits it until
++    // the current user has submitted their own (activity_privacy.py).
++    const card = document.createElement('div');
++    card.className = 'card mt-8';
++    card.style.padding = '14px';
++    card.innerHTML = `
++      <p class="qtext">${escapeHtml(activity.content.prompt)}</p>
++      <p class="text-muted small mt-8">Answer this to see what they said.</p>
++    `;
++    if (onOpenActivity) {
++      const btn = document.createElement('button');
++      btn.className = 'btn btn-secondary btn-block mt-8';
++      btn.textContent = 'Answer it';
++      btn.addEventListener('click', () => onOpenActivity(activity));
++      card.appendChild(btn);
++    }
++    return card;
++  }
++
++  function itemFor(activity) {
++    if (view === 'mutual') {
++      return renderMutual ? renderMutual(activity) : renderMineItem(activity);
++    }
++    if (view === 'partner') return renderPartnerItem(activity);
++    return renderMineItem(activity);
++  }
++
++  async function load(reset) {
++    if (reset) {
++      list.innerHTML = '<div class="skeleton" style="height:90px;margin-bottom:10px;"></div>'.repeat(3);
++      moreBtn.classList.add('hidden');
++    }
++    let data;
++    try {
++      data = await api.activities.history({ page, activityType, view });
++    } catch (err) {
++      showToast(err.message);
++      if (reset) list.innerHTML = '';
++      return;
++    }
++    if (reset) list.innerHTML = '';
++
++    if (data.activities.length === 0 && page === 1) {
++      list.innerHTML = emptyState();
++      moreBtn.classList.add('hidden');
++      return;
++    }
++
++    data.activities.forEach((a) => list.appendChild(itemFor(a)));
++    moreBtn.classList.toggle('hidden', !data.has_more);
++  }
++
++  moreBtn.addEventListener('click', () => { page += 1; load(false); });
++
++  syncTabs();
++  load(true);
++}
+diff --git a/app/static/js/views/questions.js b/app/static/js/views/questions.js
+index e473be5..60fcdb0 100644
+--- a/app/static/js/views/questions.js
++++ b/app/static/js/views/questions.js
+@@ -1,7 +1,34 @@
+ import { api } from '../api.js';
+ import { escapeHtml, showToast, openModal } from '../utils.js';
++import { partnerMember } from '../state.js';
+ import { openActivityModal } from './round.js';
+ 
++/**
++ * The Questions/Browse tab. Category browsing is unchanged - you can
++ * still open any category and pick any specific question by hand.
++ *
++ * Two additions:
++ *  - An "Unanswered only" toggle inside each category list, since with a
++ *    bank this size it gets hard to spot what you haven't done yet.
++ *    "Answered" is per-user (see routes/questions.py) - a question your
++ *    partner has answered is still unanswered for YOU until you answer it.
++ *  - A "Waiting On You" card in the category grid: classic questions your
++ *    partner has already answered and you haven't. Tapping one goes
++ *    through the same play flow as any other question, so answering it
++ *    completes that pending round and reveals immediately. Their answer
++ *    is never sent until you've submitted your own.
++ */
++
++// Rendered alongside the real categories, but it's a discovery entry
++// point rather than a category - it has no category key and its list
++// comes from a different endpoint.
++const PARTNER_CARD = {
++  key: '__partner_answered__',
++  emoji: '💌',
++  label: 'Waiting On You',
++  description: 'Questions they\'ve answered, ready for yours.',
++};
++
+ export async function renderQuestions(container) {
+   await renderCategoryGrid(container);
+ }
+@@ -10,7 +37,7 @@ async function renderCategoryGrid(container) {
+   container.innerHTML = `
+     <h1 class="page-title">Questions</h1>
+     <p class="page-subtitle">Browse by category and pick what to answer next.</p>
+-    <div class="category-grid">${Array(8).fill('<div class="skeleton" style="height:110px;border-radius:18px;"></div>').join('')}</div>
++    <div class="category-grid">${Array(9).fill('<div class="skeleton" style="height:110px;border-radius:18px;"></div>').join('')}</div>
+   `;
+ 
+   let categories;
+@@ -23,7 +50,8 @@ async function renderCategoryGrid(container) {
+ 
+   const grid = document.createElement('div');
+   grid.className = 'category-grid';
+-  categories.forEach((cat) => {
++
++  [...categories, PARTNER_CARD].forEach((cat) => {
+     const card = document.createElement('button');
+     card.className = `category-card card-tap ${cat.locked ? 'locked' : ''}`;
+     card.innerHTML = `
+@@ -35,6 +63,8 @@ async function renderCategoryGrid(container) {
+     card.addEventListener('click', () => {
+       if (cat.locked) {
+         renderSpicyLocked(container);
++      } else if (cat.key === PARTNER_CARD.key) {
++        renderPartnerAnsweredList(container);
+       } else {
+         renderQuestionList(container, cat);
+       }
+@@ -60,7 +90,17 @@ function renderSpicyLocked(container) {
+   container.querySelector('#go-settings').addEventListener('click', () => document.querySelector('.nav-btn[data-view="settings"]').click());
+ }
+ 
+-async function renderQuestionList(container, cat) {
++function listHeader(container, { emoji, label, description }) {
++  const header = document.createElement('div');
++  header.innerHTML = `
++    <div class="back-row"><button class="icon-btn" id="q-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button></div>
++    <h1 class="page-title">${emoji} ${escapeHtml(label)}</h1>
++    <p class="page-subtitle">${escapeHtml(description)}</p>
++  `;
++  return header;
++}
++
++async function renderQuestionList(container, cat, unansweredOnly = false) {
+   container.innerHTML = `
+     <div class="back-row"><button class="icon-btn" id="q-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button></div>
+     <h1 class="page-title">${cat.emoji} ${escapeHtml(cat.label)}</h1>
+@@ -71,23 +111,36 @@ async function renderQuestionList(container, cat) {
+ 
+   let questions;
+   try {
+-    questions = (await api.questions(cat.key)).questions;
++    questions = (await api.questions(cat.key, { unansweredOnly })).questions;
+   } catch (err) {
+     showToast(err.message);
+     return;
+   }
+ 
+-  const header = document.createElement('div');
+-  header.innerHTML = `
+-    <div class="back-row"><button class="icon-btn" id="q-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button></div>
+-    <h1 class="page-title">${cat.emoji} ${escapeHtml(cat.label)}</h1>
+-    <p class="page-subtitle">${escapeHtml(cat.description)}</p>
+-  `;
+-
+   container.innerHTML = '';
+-  container.appendChild(header);
++  container.appendChild(listHeader(container, cat));
+   container.querySelector('#q-back').addEventListener('click', () => renderCategoryGrid(container));
+ 
++  // Filter toggle. Re-fetches rather than hiding client-side, so the
++  // server stays the single source of truth for what counts as answered.
++  const filterRow = document.createElement('div');
++  filterRow.style.cssText = 'display:flex;gap:8px;padding-bottom:4px;';
++  [
++    { key: false, label: 'All questions' },
++    { key: true, label: 'Unanswered only' },
++  ].forEach(({ key, label }) => {
++    const chip = document.createElement('button');
++    chip.className = `chip ${key === unansweredOnly ? '' : 'chip-muted'}`;
++    chip.style.cssText = 'white-space:nowrap;border:none;';
++    chip.textContent = label;
++    chip.addEventListener('click', () => {
++      if (key === unansweredOnly) return;
++      renderQuestionList(container, cat, key);
++    });
++    filterRow.appendChild(chip);
++  });
++  container.appendChild(filterRow);
++
+   if (cat.key === 'spicy') {
+     const matchesBtn = document.createElement('button');
+     matchesBtn.className = 'btn btn-secondary btn-block mt-8';
+@@ -105,50 +158,106 @@ async function renderQuestionList(container, cat) {
+   listCard.className = 'card mt-16';
+ 
+   if (questions.length === 0) {
+-    listCard.innerHTML = `<div class="empty-state" style="padding:30px 10px;"><div class="empty-emoji">💭</div><p>No questions here yet.</p></div>`;
++    listCard.innerHTML = unansweredOnly
++      ? `<div class="empty-state" style="padding:30px 10px;"><div class="empty-emoji">✅</div><p>You've answered everything in here.</p></div>`
++      : `<div class="empty-state" style="padding:30px 10px;"><div class="empty-emoji">💭</div><p>No questions here yet.</p></div>`;
+   } else {
+-    questions.forEach((q) => {
+-      const item = document.createElement('div');
+-      item.className = 'question-list-item';
+-      item.innerHTML = `
+-        <div style="flex:1;" class="q-tap">
+-          <div class="qtext">${escapeHtml(q.text)}</div>
+-          <div class="qmeta">${q.already_played ? 'Played before' : 'Not played yet'}</div>
+-        </div>
+-        <button class="fav-btn ${q.is_favourite ? 'active' : ''}">${q.is_favourite ? '❤️' : '🤍'}</button>
+-      `;
+-      item.querySelector('.q-tap').addEventListener('click', async () => {
+-        try {
+-          const activity = await api.activities.play(q.id);
+-          openActivityModal(activity.activity_id);
+-        } catch (err) {
+-          showToast(err.message);
+-        }
+-      });
+-      const favBtn = item.querySelector('.fav-btn');
+-      favBtn.addEventListener('click', async () => {
+-        try {
+-          if (favBtn.classList.contains('active')) {
+-            await api.removeFavourite(q.id);
+-            favBtn.classList.remove('active');
+-            favBtn.textContent = '🤍';
+-          } else {
+-            await api.addFavourite(q.id);
+-            favBtn.classList.add('active');
+-            favBtn.textContent = '❤️';
+-          }
+-        } catch (err) {
+-          showToast(err.message);
+-        }
+-      });
+-      listCard.appendChild(item);
+-    });
++    questions.forEach((q) => listCard.appendChild(questionRow(q, { showPlayedState: true })));
+   }
+   container.appendChild(listCard);
+ }
+ 
++async function renderPartnerAnsweredList(container) {
++  const partner = partnerMember();
++  const meta = {
++    emoji: PARTNER_CARD.emoji,
++    label: PARTNER_CARD.label,
++    description: partner
++      ? `${partner.name} has answered these. Answer one and you'll both see the results.`
++      : "Your partner has answered these. Answer one and you'll both see the results.",
++  };
++
++  container.innerHTML = `
++    <div class="back-row"><button class="icon-btn" id="q-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button></div>
++    <h1 class="page-title">${meta.emoji} ${escapeHtml(meta.label)}</h1>
++    <p class="page-subtitle">${escapeHtml(meta.description)}</p>
++    <div class="skeleton" style="height:300px;"></div>
++  `;
++  container.querySelector('#q-back').addEventListener('click', () => renderCategoryGrid(container));
++
++  let questions;
++  try {
++    questions = (await api.partnerAnsweredQuestions()).questions;
++  } catch (err) {
++    showToast(err.message);
++    return;
++  }
++
++  container.innerHTML = '';
++  container.appendChild(listHeader(container, meta));
++  container.querySelector('#q-back').addEventListener('click', () => renderCategoryGrid(container));
++
++  const listCard = document.createElement('div');
++  listCard.className = 'card mt-16';
++
++  if (questions.length === 0) {
++    // Purely "nothing to catch up on" - never framed as a comparison of
++    // who has or hasn't been answering more.
++    listCard.innerHTML = `
++      <div class="empty-state" style="padding:30px 10px;">
++        <div class="empty-emoji">📭</div>
++        <p>Nothing waiting right now. Browse a category to start something new.</p>
++      </div>
++    `;
++  } else {
++    // Only the question text is rendered - the partner's answer isn't in
++    // this payload at all (see routes/questions.py's partner-answered).
++    questions.forEach((q) => listCard.appendChild(questionRow(q, { showPlayedState: false })));
++  }
++  container.appendChild(listCard);
++}
++
++function questionRow(q, { showPlayedState }) {
++  const item = document.createElement('div');
++  item.className = 'question-list-item';
++  item.innerHTML = `
++    <div style="flex:1;" class="q-tap">
++      <div class="qtext">${escapeHtml(q.text)}</div>
++      <div class="qmeta">${showPlayedState
++        ? (q.already_played ? 'Answered' : 'Not answered yet')
++        : 'Answer this to see what they said'}</div>
++    </div>
++    <button class="fav-btn ${q.is_favourite ? 'active' : ''}">${q.is_favourite ? '❤️' : '🤍'}</button>
++  `;
++  item.querySelector('.q-tap').addEventListener('click', async () => {
++    try {
++      const activity = await api.activities.play(q.id);
++      openActivityModal(activity.activity_id);
++    } catch (err) {
++      showToast(err.message);
++    }
++  });
++  const favBtn = item.querySelector('.fav-btn');
++  favBtn.addEventListener('click', async () => {
++    try {
++      if (favBtn.classList.contains('active')) {
++        await api.removeFavourite(q.id);
++        favBtn.classList.remove('active');
++        favBtn.textContent = '🤍';
++      } else {
++        await api.addFavourite(q.id);
++        favBtn.classList.add('active');
++        favBtn.textContent = '❤️';
++      }
++    } catch (err) {
++      showToast(err.message);
++    }
++  });
++  return item;
++}
++
+ async function showSpicyMatches() {
+-  const { close, body } = openModal('round-modal', { title: '🔥 Find Your Matches', render: () => '<div class="skeleton" style="height:160px;"></div>' });
++  const { body } = openModal('round-modal', { title: '🔥 Find Your Matches', render: () => '<div class="skeleton" style="height:160px;"></div>' });
+   try {
+     const data = await api.spicyMatches();
+     body.innerHTML = `
+diff --git a/app/static/js/views/who_would.js b/app/static/js/views/who_would.js
+index d7b0624..87ab6af 100644
+--- a/app/static/js/views/who_would.js
++++ b/app/static/js/views/who_would.js
+@@ -1,50 +1,57 @@
+ import { api } from '../api.js';
+ import { escapeHtml, openModal, showToast } from '../utils.js';
+ import { meMember, partnerMember } from '../state.js';
++import { createGameScreen } from './game_screen.js';
+ 
+-/** Opens the Who Would sheet. With no argument, fetches a fresh random
+- * activity (existing behaviour, unchanged). Passed a pre-fetched activity
++/** Opens the Who Would sheet. With no argument, fetches the next activity
++ * in whichever toggle mode is selected. Passed a pre-fetched activity
+  * (e.g. Home's daily pick), opens that specific one first instead - same
+- * pattern as wyr.js's openWyrGame. */
++ * pattern as wyr.js's openWyrGame.
++ *
++ * Toggle, completion/Play Again and Past Answers all come from
++ * createGameScreen (game_screen.js); this file supplies only the
++ * Who-Would-specific rendering. */
+ export function openWhoWouldGame(initialActivity = null) {
+   const { body } = openModal('round-modal', { title: 'Who Would...?', render: () => '<div class="skeleton" style="height:260px;"></div>' });
++
++  const screen = createGameScreen(body, {
++    activityType: 'who_would',
++    skeletonHeight: 260,
++    renderActivity,
++    renderMutual: renderPastMutual,
++    describeMine,
++    completion: {
++      emoji: '🤭',
++      heading: "You've answered every Who Would question!",
++      body: "That's the whole bank. Start a fresh round of them, or leave it here for now.",
++    },
++  });
++
+   if (initialActivity) {
+-    render(body, initialActivity);
++    screen.showActivity(initialActivity);
+   } else {
+-    loadNext(body);
+-  }
+-}
+-
+-async function loadNext(body) {
+-  body.innerHTML = '<div class="skeleton" style="height:260px;"></div>';
+-  let activity;
+-  try {
+-    activity = await api.activities.random({ activity_type: 'who_would' });
+-  } catch (err) {
+-    body.innerHTML = `<p class="text-muted" style="padding:30px 0;text-align:center;">${escapeHtml(err.message)}</p>`;
+-    return;
++    screen.loadNext();
+   }
+-  render(body, activity);
+ }
+ 
+-function render(body, activity) {
+-  body.innerHTML = '';
++function renderActivity(slot, activity, screen) {
++  slot.innerHTML = '';
+   if (!activity.my_submitted) {
+-    body.appendChild(renderChooser(activity, body));
++    slot.appendChild(renderChooser(activity, screen));
+   } else if (!activity.revealed) {
+-    body.appendChild(renderWaiting());
++    slot.appendChild(renderWaiting(screen));
+   } else {
+-    body.appendChild(renderReveal(activity, body));
++    slot.appendChild(renderReveal(activity, screen));
+   }
+ }
+ 
+-function renderChooser(activity, body) {
++function renderChooser(activity, screen) {
+   const wrap = document.createElement('div');
+   const partner = partnerMember();
+   const selection = { choice: null, explanation: '' };
+ 
+   wrap.innerHTML = `
+-    <p class="wyr-prompt">${escapeHtml(activity.content.prompt)}</p>
++    <p class="wyr-prompt mt-16">${escapeHtml(activity.content.prompt)}</p>
+     <div class="answer-option-list mt-16">
+       <button type="button" class="answer-option" data-choice="me">🙋 Me</button>
+       <button type="button" class="answer-option" data-choice="partner">${partner ? escapeHtml(partner.name) : 'My partner'}</button>
+@@ -71,9 +78,15 @@ function renderChooser(activity, body) {
+     submitBtn.disabled = true;
+     submitBtn.textContent = 'Submitting…';
+     try {
+-      await api.activities.submit(activity.activity_id, { choice: selection.choice, explanation: selection.explanation.trim() });
++      const updated = await api.activities.submit(activity.activity_id, { choice: selection.choice, explanation: selection.explanation.trim() });
+       showToast('Locked in ✓');
+-      loadNext(body);
++      // Completing a round the partner had already answered reveals
++      // immediately - show it rather than skipping past the reveal.
++      if (updated && updated.revealed) {
++        screen.showActivity(updated);
++      } else {
++        screen.loadNext();
++      }
+     } catch (err) {
+       showToast(err.message || 'Could not submit.');
+       submitBtn.disabled = false;
+@@ -84,7 +97,7 @@ function renderChooser(activity, body) {
+   return wrap;
+ }
+ 
+-function renderWaiting() {
++function renderWaiting(screen) {
+   const wrap = document.createElement('div');
+   const partner = partnerMember();
+   wrap.innerHTML = `
+@@ -96,10 +109,30 @@ function renderWaiting() {
+       </p>
+     </div>
+   `;
++  const nextBtn = document.createElement('button');
++  nextBtn.className = 'btn btn-primary btn-block mt-16';
++  nextBtn.textContent = 'Next Question';
++  nextBtn.addEventListener('click', () => screen.loadNext());
++  wrap.appendChild(nextBtn);
+   return wrap;
+ }
+ 
+-function renderReveal(activity, body) {
++function renderReveal(activity, screen) {
++  const wrap = document.createElement('div');
++  wrap.appendChild(revealBody(activity));
++
++  const nextBtn = document.createElement('button');
++  nextBtn.className = 'btn btn-primary btn-block mt-16';
++  nextBtn.textContent = 'Next Question';
++  nextBtn.addEventListener('click', () => screen.loadNext());
++  wrap.appendChild(nextBtn);
++
++  return wrap;
++}
++
++/** The reveal itself with no navigation attached - shared by the live
++ * reveal screen and Past Answers' "Mutual" tab. */
++function revealBody(activity) {
+   const wrap = document.createElement('div');
+   const me = meMember();
+   const partner = partnerMember();
+@@ -112,7 +145,7 @@ function renderReveal(activity, body) {
+     return 'Someone';
+   };
+ 
+-  wrap.innerHTML = `<p class="wyr-prompt">${escapeHtml(activity.content.prompt)}</p>`;
++  wrap.innerHTML = `<p class="wyr-prompt mt-16">${escapeHtml(activity.content.prompt)}</p>`;
+ 
+   [
+     { member: me, submission: activity.my_submission },
+@@ -136,11 +169,29 @@ function renderReveal(activity, body) {
+   banner.textContent = unanimous ? '😂 UNANIMOUS' : '🤷 Split decision!';
+   wrap.appendChild(banner);
+ 
+-  const nextBtn = document.createElement('button');
+-  nextBtn.className = 'btn btn-primary btn-block mt-16';
+-  nextBtn.textContent = 'Next Question';
+-  nextBtn.addEventListener('click', () => loadNext(body));
+-  wrap.appendChild(nextBtn);
+-
+   return wrap;
+ }
++
++function renderPastMutual(activity) {
++  const card = document.createElement('div');
++  card.className = 'card mt-8';
++  card.style.padding = '14px';
++  card.appendChild(revealBody(activity));
++  return card;
++}
++
++/** One-line summary of my own pick, for the "Mine" tab - which includes
++ * rounds the partner hasn't answered yet, so it must read only my own
++ * submission. "me"/"partner" is relative to the submitter (see
++ * services/activities/who_would.py), and this is always my submission,
++ * so resolving it against my own identity is correct here. */
++function describeMine(activity) {
++  const sub = activity.my_submission;
++  if (!sub || !sub.payload || !sub.payload.choice) return '';
++  const me = meMember();
++  const partner = partnerMember();
++  const picked = sub.payload.choice === 'me'
++    ? (me ? me.name : 'you')
++    : (partner ? partner.name : 'your partner');
++  return `You said: ${picked}`;
++}
+diff --git a/app/static/js/views/wyr.js b/app/static/js/views/wyr.js
+index 16bc240..2e4167d 100644
+--- a/app/static/js/views/wyr.js
++++ b/app/static/js/views/wyr.js
+@@ -1,52 +1,57 @@
+ import { api } from '../api.js';
+ import { escapeHtml, openModal, showToast } from '../utils.js';
+ import { meMember, partnerMember } from '../state.js';
++import { createGameScreen } from './game_screen.js';
+ 
+-/** Opens the Would You Rather sheet. With no argument, fetches a fresh
+- * random WYR activity (existing behaviour, unchanged). Passed a
+- * pre-fetched activity (e.g. Home's daily pick), opens that specific one
+- * first instead - "Next Question" still moves on to fresh random ones
+- * from there. Lets Home deep-link into the exact activity it displayed,
+- * rather than the user tapping through to a different random one. */
++/** Opens the Would You Rather sheet. With no argument, fetches the next
++ * WYR activity in whichever toggle mode is selected. Passed a pre-fetched
++ * activity (e.g. Home's daily pick), opens that specific one first
++ * instead - "Next Question" still moves on from there. Lets Home
++ * deep-link into the exact activity it displayed.
++ *
++ * The toggle, completion/Play Again state and Past Answers link all come
++ * from createGameScreen - see game_screen.js. This file only supplies the
++ * Would-You-Rather-specific rendering. */
+ export function openWyrGame(initialActivity = null) {
+-  const { close, body } = openModal('round-modal', { title: 'Would You Rather', render: () => '<div class="skeleton" style="height:260px;"></div>' });
++  const { body } = openModal('round-modal', { title: 'Would You Rather', render: () => '<div class="skeleton" style="height:260px;"></div>' });
++
++  const screen = createGameScreen(body, {
++    activityType: 'would_you_rather',
++    skeletonHeight: 260,
++    renderActivity,
++    renderMutual: renderPastMutual,
++    describeMine,
++    completion: {
++      emoji: '🎉',
++      heading: "You've answered every Would You Rather question!",
++      body: "That's the whole bank. Start a fresh round of them, or leave it here for now.",
++    },
++  });
++
+   if (initialActivity) {
+-    render(body, initialActivity);
++    screen.showActivity(initialActivity);
+   } else {
+-    loadNext(body);
+-  }
+-}
+-
+-async function loadNext(body) {
+-  body.innerHTML = '<div class="skeleton" style="height:260px;"></div>';
+-  let activity;
+-  try {
+-    activity = await api.activities.random({ activity_type: 'would_you_rather' });
+-  } catch (err) {
+-    // no more content in this activity_type/category combo, or a network issue
+-    body.innerHTML = `<p class="text-muted" style="padding:30px 0;text-align:center;">${escapeHtml(err.message)}</p>`;
+-    return;
++    screen.loadNext();
+   }
+-  render(body, activity);
+ }
+ 
+-function render(body, activity) {
+-  body.innerHTML = '';
++function renderActivity(slot, activity, screen) {
++  slot.innerHTML = '';
+   if (!activity.my_submitted) {
+-    body.appendChild(renderChooser(activity, body));
++    slot.appendChild(renderChooser(activity, screen));
+   } else if (!activity.revealed) {
+-    body.appendChild(renderWaiting(activity));
++    slot.appendChild(renderWaiting(activity, screen));
+   } else {
+-    body.appendChild(renderReveal(activity, body));
++    slot.appendChild(renderReveal(activity, screen));
+   }
+ }
+ 
+-function renderChooser(activity, body) {
++function renderChooser(activity, screen) {
+   const wrap = document.createElement('div');
+   const { option_a, option_b, emoji_a, emoji_b } = activity.content.payload;
+ 
+   wrap.innerHTML = `
+-    <p class="wyr-prompt">${escapeHtml(activity.content.prompt)}</p>
++    <p class="wyr-prompt mt-16">${escapeHtml(activity.content.prompt)}</p>
+     <div class="wyr-options">
+       <button class="wyr-option-card" data-choice="a">
+         ${emoji_a ? `<span class="wyr-emoji">${emoji_a}</span>` : ''}
+@@ -65,9 +70,16 @@ function renderChooser(activity, body) {
+       wrap.querySelectorAll('.wyr-option-card').forEach((b) => (b.disabled = true));
+       btn.classList.add('selected');
+       try {
+-        await api.activities.submit(activity.activity_id, { choice: btn.dataset.choice });
++        const updated = await api.activities.submit(activity.activity_id, { choice: btn.dataset.choice });
+         showToast('Choice locked in ✓');
+-        loadNext(body);
++        // If this submission completed a round the partner had already
++        // answered, the response is already revealed - show that reveal
++        // rather than skipping straight past it to the next question.
++        if (updated && updated.revealed) {
++          screen.showActivity(updated);
++        } else {
++          screen.loadNext();
++        }
+       } catch (err) {
+         showToast(err.message || 'Could not submit your choice.');
+         wrap.querySelectorAll('.wyr-option-card').forEach((b) => (b.disabled = false));
+@@ -78,7 +90,7 @@ function renderChooser(activity, body) {
+   return wrap;
+ }
+ 
+-function renderWaiting(activity) {
++function renderWaiting(activity, screen) {
+   const wrap = document.createElement('div');
+   const partner = partnerMember();
+   wrap.innerHTML = `
+@@ -91,10 +103,31 @@ function renderWaiting(activity) {
+       </p>
+     </div>
+   `;
++  const nextBtn = document.createElement('button');
++  nextBtn.className = 'btn btn-primary btn-block mt-16';
++  nextBtn.textContent = 'Next Question';
++  nextBtn.addEventListener('click', () => screen.loadNext());
++  wrap.appendChild(nextBtn);
++  return wrap;
++}
++
++function renderReveal(activity, screen) {
++  const wrap = document.createElement('div');
++  wrap.appendChild(revealBody(activity));
++
++  const nextBtn = document.createElement('button');
++  nextBtn.className = 'btn btn-primary btn-block mt-16';
++  nextBtn.textContent = 'Next Question';
++  nextBtn.addEventListener('click', () => screen.loadNext());
++  wrap.appendChild(nextBtn);
++
+   return wrap;
+ }
+ 
+-function renderReveal(activity, body) {
++/** The reveal itself, with no navigation attached - shared by the live
++ * reveal screen and the Past Answers "Mutual" list, so a past round looks
++ * exactly like it did when it revealed. */
++function revealBody(activity) {
+   const wrap = document.createElement('div');
+   const me = meMember();
+   const partner = partnerMember();
+@@ -104,7 +137,7 @@ function renderReveal(activity, body) {
+   const matched = activity.result && activity.result.outcome === 'match';
+ 
+   wrap.innerHTML = `
+-    <p class="wyr-prompt">${escapeHtml(activity.content.prompt)}</p>
++    <p class="wyr-prompt mt-16">${escapeHtml(activity.content.prompt)}</p>
+     <div class="wyr-options">
+       ${optionCard('a', option_a, emoji_a, myChoice, partnerChoice, me, partner)}
+       <div class="wyr-divider">OR</div>
+@@ -113,12 +146,27 @@ function renderReveal(activity, body) {
+     <div class="wyr-result-banner ${matched ? 'match' : 'no-match'}">
+       ${matched ? '🎉 You matched! +1 point each.' : '🤷 Different picks this time — no points, but hey, now you know.'}
+     </div>
+-    <button class="btn btn-primary btn-block mt-16" id="wyr-next">Next Question</button>
+   `;
++  return wrap;
++}
+ 
+-  wrap.querySelector('#wyr-next').addEventListener('click', () => loadNext(body));
++function renderPastMutual(activity) {
++  const card = document.createElement('div');
++  card.className = 'card mt-8';
++  card.style.padding = '14px';
++  card.appendChild(revealBody(activity));
++  return card;
++}
+ 
+-  return wrap;
++/** One-line summary of my own choice, for the Past Answers "Mine" tab
++ * (which can include rounds the partner hasn't answered yet, so it must
++ * never read anything but my own submission). */
++function describeMine(activity) {
++  const sub = activity.my_submission;
++  if (!sub || !sub.payload) return '';
++  const { option_a, option_b } = activity.content.payload;
++  const chosen = sub.payload.choice === 'a' ? option_a : option_b;
++  return chosen ? `You chose: ${chosen}` : '';
+ }
+ 
+ function optionCard(key, text, emoji, myChoice, partnerChoice, me, partner) {
+diff --git a/app/templates/index.html b/app/templates/index.html
+index bd7354c..45b8e72 100644
+--- a/app/templates/index.html
++++ b/app/templates/index.html
+@@ -93,9 +93,9 @@
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6a1 1 0 0 1 1 1v1h1.5A1.5 1.5 0 0 1 19 7.5v12A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5v-12A1.5 1.5 0 0 1 6.5 6H8V5a1 1 0 0 1 1-1Z"/><path d="M9 10.5l2 2 4-4.5"/><path d="M8.5 16.5h7"/></svg>
+           <span>Plans</span>
+         </button>
+-        <button class="nav-btn" data-view="history" aria-label="History">
++        <button class="nav-btn" data-view="history" aria-label="Past Answers">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+-          <span>History</span>
++          <span>Answers</span>
+         </button>
+         <button class="nav-btn" data-view="stats" aria-label="Stats">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>
+diff --git a/migrations/versions/65c183150546_add_activity_cycles_for_play_again.py b/migrations/versions/65c183150546_add_activity_cycles_for_play_again.py
+new file mode 100644
+index 0000000..a813206
+--- /dev/null
++++ b/migrations/versions/65c183150546_add_activity_cycles_for_play_again.py
+@@ -0,0 +1,55 @@
++"""add activity_cycles + activity_submissions.cycle for per-user Play Again
++
++Revision ID: 65c183150546
++Revises: 4d1607a933e0
++Create Date: 2026-09-15 00:00:00.000000
++
++Supports the toggle/cycle feature on Would You Rather, Know Each Other,
++and Who Would: each (user, activity_type) tracks which "cycle" (pass
++through the content bank) they're currently on, and every submission is
++tagged with the cycle it was made in. Play Again advances the cycle
++without touching old submissions, so "have I already answered this" can
++be scoped to the current cycle only while full history stays intact.
++
++Every existing submission defaults to cycle=1, which is exactly correct -
++they were all made before this feature existed, i.e. during everyone's
++first (and so far only) cycle.
++"""
++from alembic import op
++import sqlalchemy as sa
++
++
++# revision identifiers, used by Alembic.
++revision = '65c183150546'
++down_revision = '4d1607a933e0'
++branch_labels = None
++depends_on = None
++
++
++def upgrade():
++    op.create_table(
++        'activity_cycles',
++        sa.Column('id', sa.Integer(), nullable=False),
++        sa.Column('user_id', sa.Integer(), nullable=False),
++        sa.Column('activity_type', sa.String(length=32), nullable=False),
++        sa.Column('cycle', sa.Integer(), nullable=False, server_default='1'),
++        sa.Column('updated_at', sa.DateTime(), nullable=False),
++        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
++        sa.PrimaryKeyConstraint('id'),
++        sa.UniqueConstraint('user_id', 'activity_type', name='uq_activity_cycle_user_type'),
++    )
++    with op.batch_alter_table('activity_cycles', schema=None) as batch_op:
++        batch_op.create_index(batch_op.f('ix_activity_cycles_user_id'), ['user_id'], unique=False)
++
++    with op.batch_alter_table('activity_submissions', schema=None) as batch_op:
++        batch_op.add_column(sa.Column('cycle', sa.Integer(), nullable=False, server_default='1'))
++
++
++def downgrade():
++    with op.batch_alter_table('activity_submissions', schema=None) as batch_op:
++        batch_op.drop_column('cycle')
++
++    with op.batch_alter_table('activity_cycles', schema=None) as batch_op:
++        batch_op.drop_index(batch_op.f('ix_activity_cycles_user_id'))
++
++    op.drop_table('activity_cycles')
+diff --git a/tests/test_answer_coordination.py b/tests/test_answer_coordination.py
+new file mode 100644
+index 0000000..9be35ac
+--- /dev/null
++++ b/tests/test_answer_coordination.py
+@@ -0,0 +1,399 @@
++"""Answer Coordination & Three-Way History - see the build prompt this
++was written from. Covers:
++  - the core bug fix: a partner's pending answer can now actually be
++    completed by the other partner, instead of the content being
++    permanently excluded once anyone has an Activity for it
++  - mode=unanswered / mode=partner_pending on /api/activities/random
++  - cycle-based Play Again (bank_exhausted -> /play-again -> repeat)
++  - the three-way /api/activities/history views (mine/mutual/partner)
++    and that a partner's answer is never leaked pre-reveal
++  - the Browse tab's unanswered_only filter and partner-answered
++    discovery endpoint, with the same privacy guarantee
++"""
++
++from app.extensions import db
++from app.models import ActivityContent
++
++
++def _create_content(activity_type, category, payload, prompt="Test content"):
++    content = ActivityContent(activity_type=activity_type, category=category, prompt=prompt)
++    content.payload = payload
++    db.session.add(content)
++    db.session.commit()
++    return content.id
++
++
++def _wyr_content(app, prompt="Test content"):
++    with app.app_context():
++        return _create_content(
++            "would_you_rather", "normal",
++            {"option_a": "Mountains", "option_b": "Beach"},
++            prompt=prompt,
++        )
++
++
++# ---------------------------------------------------------------------------
++# Core bug fix: mode=unanswered no longer permanently excludes content once
++# ANY activity exists for it - only once THIS user has personally answered.
++# ---------------------------------------------------------------------------
++
++def test_partner_answering_first_does_not_permanently_hide_content(app, couple):
++    """This is the exact bug from the build prompt: Tom answers a WYR,
++    and Sarah must still be able to be served that same content (and,
++    critically, completing her own Activity reuses Tom's pending one
++    instead of creating a duplicate that can never reveal)."""
++    tom, sarah = couple["tom"], couple["sarah"]
++    _wyr_content(app)
++
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 200
++    activity = resp.get_json()
++    tom.post(f"/api/activities/{activity['activity_id']}/submit", json={"choice": "a"})
++
++    # Sarah must still be able to draw this same content - the couple-wide
++    # exclusion bug would 404 her here with no_content/bank_exhausted.
++    resp = sarah.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 200
++    sarah_activity = resp.get_json()
++    assert sarah_activity["activity_id"] == activity["activity_id"], (
++        "Sarah's random draw should reuse Tom's pending Activity, not create a new one"
++    )
++    assert sarah_activity["my_submitted"] is False
++    assert sarah_activity["partner_submitted"] is True
++    assert "partner_submission" not in sarah_activity, "partner's answer must stay hidden until Sarah submits too"
++
++    resp = sarah.post(f"/api/activities/{activity['activity_id']}/submit", json={"choice": "a"})
++    assert resp.status_code == 201
++    data = resp.get_json()
++    assert data["revealed"] is True
++    assert data["result"]["outcome"] == "match"
++
++
++def test_unanswered_mode_excludes_only_my_own_submissions(app, couple):
++    tom, sarah = couple["tom"], couple["sarah"]
++    id1 = _wyr_content(app, prompt="Q1")
++    _wyr_content(app, prompt="Q2")
++
++    # Tom answers content #1 directly (bypassing random) so we control which one is "used".
++    with app.app_context():
++        from app.services.activity_questions import get_or_create_activity_for_content
++        from app.models import ActivityContent as AC, Couple
++        couple_row = Couple.query.first()
++        content = AC.query.get(id1)
++        activity = get_or_create_activity_for_content(couple_row, content)
++        activity_id = activity.id
++    tom.post(f"/api/activities/{activity_id}/submit", json={"choice": "a"})
++
++    # Tom draws again - must never get content #1 back (he's answered it),
++    # only #2 is left. He answers it too, to genuinely exhaust the bank.
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 200
++    assert resp.get_json()["content"]["prompt"] == "Q2"
++    tom.post(f"/api/activities/{resp.get_json()['activity_id']}/submit", json={"choice": "a"})
++
++    # A third draw must now report bank_exhausted for Tom, not no_content.
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 404
++    assert resp.get_json()["error"] == "bank_exhausted"
++
++    # Sarah, meanwhile, has answered nothing - both questions are still
++    # open to her, including Q1 which Tom has already answered. (She has to
++    # submit between draws: an undrawn-but-unanswered question stays
++    # eligible, so without submitting, random may legitimately repeat.)
++    seen = set()
++    for _ in range(2):
++        resp = sarah.get("/api/activities/random?activity_type=would_you_rather")
++        assert resp.status_code == 200
++        data = resp.get_json()
++        seen.add(data["content"]["prompt"])
++        sarah.post(f"/api/activities/{data['activity_id']}/submit", json={"choice": "b"})
++    assert seen == {"Q1", "Q2"}
++
++
++# ---------------------------------------------------------------------------
++# mode=partner_pending
++# ---------------------------------------------------------------------------
++
++def test_partner_pending_mode_surfaces_and_completes_pending_activity(app, couple):
++    tom, sarah = couple["tom"], couple["sarah"]
++    _wyr_content(app)
++
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    activity_id = resp.get_json()["activity_id"]
++    tom.post(f"/api/activities/{activity_id}/submit", json={"choice": "b"})
++
++    resp = sarah.get("/api/activities/random?activity_type=would_you_rather&mode=partner_pending")
++    assert resp.status_code == 200
++    data = resp.get_json()
++    assert data["activity_id"] == activity_id
++    assert "partner_submission" not in data
++
++    resp = sarah.post(f"/api/activities/{activity_id}/submit", json={"choice": "b"})
++    assert resp.status_code == 201
++    assert resp.get_json()["revealed"] is True
++
++
++def test_partner_pending_mode_says_so_clearly_when_nothing_pending(app, couple):
++    tom, sarah = couple["tom"], couple["sarah"]
++    _wyr_content(app)
++
++    resp = sarah.get("/api/activities/random?activity_type=would_you_rather&mode=partner_pending")
++    assert resp.status_code == 404
++    data = resp.get_json()
++    assert data["error"] == "no_pending"
++    assert "Tom" in data["message"]
++
++
++# ---------------------------------------------------------------------------
++# Cycle-based Play Again
++# ---------------------------------------------------------------------------
++
++def test_play_again_starts_a_fresh_cycle_with_no_repeats(app, couple):
++    tom, sarah = couple["tom"], couple["sarah"]
++    _wyr_content(app, prompt="Only Question")
++
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    activity_id = resp.get_json()["activity_id"]
++    tom.post(f"/api/activities/{activity_id}/submit", json={"choice": "a"})
++    # Sarah completes/reveals it too - otherwise the old Activity is still
++    # unrevealed and would legitimately be reused rather than replaced.
++    sarah.post(f"/api/activities/{activity_id}/submit", json={"choice": "a"})
++
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 404
++    assert resp.get_json()["error"] == "bank_exhausted"
++
++    resp = tom.post("/api/activities/play-again", json={"activity_type": "would_you_rather"})
++    assert resp.status_code == 200
++    assert resp.get_json()["cycle"] == 2
++
++    # Fresh cycle: the same content is eligible again.
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 200
++    assert resp.get_json()["content"]["prompt"] == "Only Question"
++
++    # And a NEW Activity row was created for this cycle's round (the old
++    # one is already revealed, so it can't be reused).
++    new_activity_id = resp.get_json()["activity_id"]
++    assert new_activity_id != activity_id
++
++    # Answering again exhausts this cycle too - no infinite repeat.
++    tom.post(f"/api/activities/{new_activity_id}/submit", json={"choice": "a"})
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 404
++    assert resp.get_json()["error"] == "bank_exhausted"
++
++
++def test_play_again_does_not_reuse_an_activity_i_already_submitted_to(app, couple):
++    """Regression: in cycle 2 the content becomes eligible again, but the
++    cycle-1 Activity may still be unrevealed with MY submission on it
++    (partner never answered). Reusing that row made the submit fail as a
++    duplicate, so the content never counted as answered in the new cycle
++    and the same question repeated forever."""
++    tom = couple["tom"]
++    _wyr_content(app, prompt="Only Question")
++
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    first_id = resp.get_json()["activity_id"]
++    tom.post(f"/api/activities/{first_id}/submit", json={"choice": "a"})
++    # Partner deliberately never answers - the round stays unrevealed.
++
++    tom.post("/api/activities/play-again", json={"activity_type": "would_you_rather"})
++
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 200
++    second_id = resp.get_json()["activity_id"]
++    assert second_id != first_id, "cycle 2 must not reuse an activity I've already submitted to"
++
++    # It must actually accept the submission (the old bug 400'd here)...
++    resp = tom.post(f"/api/activities/{second_id}/submit", json={"choice": "b"})
++    assert resp.status_code == 201
++
++    # ...and that must genuinely exhaust the cycle, not loop forever.
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 404
++    assert resp.get_json()["error"] == "bank_exhausted"
++
++
++def test_browse_replay_still_reuses_my_pending_activity(app, couple):
++    """The flip side of the above: Browse must NOT get the new-activity
++    behaviour. Re-opening a question you already answered should show
++    your existing pending round, not silently start a second one."""
++    tom = couple["tom"]
++
++    with app.app_context():
++        from app.models import Question
++        from scripts.migrate_questions_to_activities import migrate
++        migrate()
++        question = Question.query.filter_by(category="relationship", question_type="free_text").first()
++        qid = question.id
++
++    first = tom.post(f"/api/activities/play/{qid}").get_json()["activity_id"]
++    tom.post(f"/api/activities/{first}/submit", json={"answer_text": "my answer"})
++
++    second = tom.post(f"/api/activities/play/{qid}").get_json()["activity_id"]
++    assert second == first
++    assert tom.get(f"/api/activities/{second}").get_json()["my_submitted"] is True
++
++
++def test_play_again_does_not_affect_the_other_partner(app, couple):
++    tom, sarah = couple["tom"], couple["sarah"]
++    _wyr_content(app, prompt="Only Question")
++
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    activity_id = resp.get_json()["activity_id"]
++    tom.post(f"/api/activities/{activity_id}/submit", json={"choice": "a"})
++    tom.post("/api/activities/play-again", json={"activity_type": "would_you_rather"})
++
++    # Sarah has never answered - she's not affected by Tom's cycle at all.
++    resp = sarah.get("/api/activities/random?activity_type=would_you_rather")
++    assert resp.status_code == 200
++
++
++# ---------------------------------------------------------------------------
++# Three-way /api/activities/history
++# ---------------------------------------------------------------------------
++
++def test_history_mine_mutual_partner_views(app, couple):
++    tom, sarah = couple["tom"], couple["sarah"]
++    _wyr_content(app, prompt="Mutual Q")
++    _wyr_content(app, prompt="Partner Only Q")
++
++    # Fully mutual round.
++    resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    mutual_id = None
++    for _ in range(2):
++        data = resp.get_json()
++        if data["content"]["prompt"] == "Mutual Q":
++            mutual_id = data["activity_id"]
++            break
++        resp = tom.get("/api/activities/random?activity_type=would_you_rather")
++    assert mutual_id is not None
++    tom.post(f"/api/activities/{mutual_id}/submit", json={"choice": "a"})
++    sarah.post(f"/api/activities/{mutual_id}/submit", json={"choice": "b"})
++
++    # Partner-only pending round: Sarah answers "Partner Only Q", Tom doesn't yet.
++    resp = sarah.get("/api/activities/random?activity_type=would_you_rather")
++    pending_id = None
++    for _ in range(2):
++        data = resp.get_json()
++        if data["content"]["prompt"] == "Partner Only Q":
++            pending_id = data["activity_id"]
++            break
++        resp = sarah.get("/api/activities/random?activity_type=would_you_rather")
++    assert pending_id is not None
++    sarah.post(f"/api/activities/{pending_id}/submit", json={"choice": "a"})
++
++    # Tom's "mine": only the mutual one (he hasn't touched the pending one).
++    resp = tom.get("/api/activities/history?activity_type=would_you_rather&view=mine")
++    assert resp.status_code == 200
++    mine_ids = {a["activity_id"] for a in resp.get_json()["activities"]}
++    assert mine_ids == {mutual_id}
++
++    # Tom's "mutual": the completed one.
++    resp = tom.get("/api/activities/history?activity_type=would_you_rather&view=mutual")
++    mutual_ids = {a["activity_id"] for a in resp.get_json()["activities"]}
++    assert mutual_ids == {mutual_id}
++
++    # Tom's "partner": Sarah's pending answer, question visible, answer hidden.
++    resp = tom.get("/api/activities/history?activity_type=would_you_rather&view=partner")
++    assert resp.status_code == 200
++    partner_items = resp.get_json()["activities"]
++    assert {a["activity_id"] for a in partner_items} == {pending_id}
++    item = partner_items[0]
++    assert item["content"]["prompt"] == "Partner Only Q"
++    assert "partner_submission" not in item
++    assert item["my_submitted"] is False
++
++    # Sarah's "partner" view must be empty - she has nothing pending from Tom.
++    resp = sarah.get("/api/activities/history?activity_type=would_you_rather&view=partner")
++    assert resp.get_json()["activities"] == []
++
++
++def test_history_rejects_unknown_view(couple):
++    tom = couple["tom"]
++    resp = tom.get("/api/activities/history?view=bogus")
++    assert resp.status_code == 400
++
++
++# ---------------------------------------------------------------------------
++# Browse tab: unanswered_only filter + partner-answered discovery
++# ---------------------------------------------------------------------------
++
++def test_questions_unanswered_only_filter(app, couple):
++    """Uses the real seeded legacy Question bank via the migration path so
++    already_played reflects genuine per-user Activity submissions."""
++    tom, sarah = couple["tom"], couple["sarah"]
++
++    with app.app_context():
++        from app.models import Question
++        from app.services.activity_questions import get_or_create_activity_for_content
++        from scripts.migrate_questions_to_activities import migrate
++        migrate()
++        from app.models import Couple
++        couple_row = Couple.query.first()
++        question = Question.query.filter_by(category="relationship", question_type="free_text").first()
++        from app.models import ActivityContent as AC
++        content = AC.query.filter(AC.activity_type == "classic_question").all()
++        match = next(c for c in content if c.payload.get("legacy_question_id") == question.id)
++        activity = get_or_create_activity_for_content(couple_row, content=match)
++        activity_id = activity.id
++        target_question_id = question.id
++
++    tom.post(f"/api/activities/{activity_id}/submit", json={"answer_text": "test answer"})
++
++    resp = tom.get("/api/questions?category=relationship")
++    all_qs = resp.get_json()["questions"]
++    target = next(q for q in all_qs if q["id"] == target_question_id)
++    assert target["already_played"] is True
++
++    resp = tom.get("/api/questions?category=relationship&unanswered_only=true")
++    unanswered_ids = {q["id"] for q in resp.get_json()["questions"]}
++    assert target_question_id not in unanswered_ids
++
++    # Sarah hasn't answered it herself - it must still show up for her,
++    # unanswered_only or not (the couple-wide bug this whole feature fixes).
++    resp = sarah.get("/api/questions?category=relationship&unanswered_only=true")
++    assert target_question_id in {q["id"] for q in resp.get_json()["questions"]}
++
++
++def test_partner_answered_discovery_endpoint(app, couple):
++    tom, sarah = couple["tom"], couple["sarah"]
++
++    with app.app_context():
++        from app.models import Question, Couple, ActivityContent as AC
++        from app.services.activity_questions import get_or_create_activity_for_content
++        from scripts.migrate_questions_to_activities import migrate
++        migrate()
++        couple_row = Couple.query.first()
++        question = Question.query.filter_by(category="relationship", question_type="free_text").first()
++        content = AC.query.filter(AC.activity_type == "classic_question").all()
++        match = next(c for c in content if c.payload.get("legacy_question_id") == question.id)
++        activity = get_or_create_activity_for_content(couple_row, content=match)
++        activity_id = activity.id
++        target_question_id = question.id
++
++    # Nothing pending yet.
++    resp = sarah.get("/api/questions/partner-answered")
++    assert resp.get_json()["questions"] == []
++
++    tom.post(f"/api/activities/{activity_id}/submit", json={"answer_text": "tom's answer"})
++
++    resp = sarah.get("/api/questions/partner-answered")
++    assert resp.status_code == 200
++    items = resp.get_json()["questions"]
++    assert any(q["id"] == target_question_id for q in items)
++
++    # Sarah answers via the normal play flow (get_or_create must reuse the
++    # same pending Activity, not create a duplicate) and it completes.
++    resp = sarah.post(f"/api/activities/play/{target_question_id}")
++    assert resp.status_code == 201
++    assert resp.get_json()["activity_id"] == activity_id
++
++    resp = sarah.post(f"/api/activities/{activity_id}/submit", json={"answer_text": "sarah's answer"})
++    assert resp.status_code == 201
++    assert resp.get_json()["revealed"] is True
++
++    # And it's gone from the discovery list now that it's resolved.
++    resp = tom.get("/api/questions/partner-answered")
++    assert resp.get_json()["questions"] == []

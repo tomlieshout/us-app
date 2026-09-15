@@ -69,7 +69,16 @@ export const api = {
 
   // Questions
   categories: () => request('GET', '/api/questions/categories'),
-  questions: (category) => request('GET', `/api/questions${category ? `?category=${encodeURIComponent(category)}` : ''}`),
+  questions: (category, { unansweredOnly } = {}) => {
+    const params = new URLSearchParams();
+    if (category) params.set('category', category);
+    if (unansweredOnly) params.set('unanswered_only', 'true');
+    const qs = params.toString();
+    return request('GET', `/api/questions${qs ? `?${qs}` : ''}`);
+  },
+  // Browse tab's "Waiting On You" discovery card - classic questions the
+  // partner has answered and this user hasn't. Never includes their answer.
+  partnerAnsweredQuestions: () => request('GET', '/api/questions/partner-answered'),
   playQuestion: (id) => request('POST', `/api/questions/${id}/play`),
 
   // Rounds (legacy engine - kept for rollback safety; the live UI now
@@ -90,19 +99,31 @@ export const api = {
   // the architectural-integration phase. See app/routes/activities.py.
   activities: {
     current: () => request('GET', '/api/activities/current'),
-    random: ({ category, activity_type } = {}) => {
+    // mode: 'unanswered' (default) | 'partner_pending' - the Answer
+    // Coordination toggle. See app/routes/activities.py's /random.
+    random: ({ category, activity_type, mode } = {}) => {
       const params = new URLSearchParams();
       if (category) params.set('category', category);
       if (activity_type) params.set('activity_type', activity_type);
+      if (mode) params.set('mode', mode);
       const qs = params.toString();
       return request('GET', `/api/activities/random${qs ? `?${qs}` : ''}`);
     },
+    // Starts one fresh cycle through this game's bank once the user has
+    // personally answered everything in it.
+    playAgain: (activity_type) => request('POST', '/api/activities/play-again', { activity_type }),
     play: (legacyQuestionId) => request('POST', `/api/activities/play/${legacyQuestionId}`),
     get: (id) => request('GET', `/api/activities/${id}`),
     submit: (id, data) => request('POST', `/api/activities/${id}/submit`, data),
-    history: (page, category) => {
+    // view: 'mine' | 'mutual' (default) | 'partner' - the three-way Past
+    // Answers structure, shared by all four features. Options-object
+    // form: the old positional (page, category) signature silently
+    // dropped the activity_type argument game_history.js was passing.
+    history: ({ page, category, activityType, view } = {}) => {
       const params = new URLSearchParams({ page: page || 1 });
       if (category) params.set('category', category);
+      if (activityType) params.set('activity_type', activityType);
+      if (view) params.set('view', view);
       return request('GET', `/api/activities/history?${params.toString()}`);
     },
   },
