@@ -16,6 +16,13 @@ import { openActivityModal } from './round.js';
  *               own (app/services/activity_privacy.py), and this view
  *               renders nothing but the prompt regardless.
  *
+ * Scoped to activityType: 'classic_question' only - this page is "Past
+ * Answers" for the question bank specifically. Would You Rather, Know
+ * Each Other, and Who Would each have their own Past Answers sheet
+ * (opened from within that game - see game_screen.js's openPastAnswers)
+ * rather than surfacing here, so this page doesn't mix question answers
+ * with game rounds.
+ *
  * It doesn't reuse renderPastAnswers() itself because this page is a
  * full view with category filters rather than a sheet, but both go
  * through the same GET /api/activities/history?view= endpoint - the
@@ -125,7 +132,7 @@ export async function renderHistory(container) {
     }
     let data;
     try {
-      data = await api.activities.history({ page, category: activeFilter || undefined, view });
+      data = await api.activities.history({ page, category: activeFilter || undefined, view, activityType: 'classic_question' });
     } catch (err) {
       showToast(err.message);
       if (reset) list.innerHTML = '';

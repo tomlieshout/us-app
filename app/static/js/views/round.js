@@ -193,19 +193,28 @@ function optionList(options, onSelect) {
 
 // ------------------------------------------------------------------ Waiting
 
-function renderWaiting() {
+function renderWaiting(data) {
   const wrap = document.createElement('div');
   const partner = partnerMember();
+  const me = meMember();
+
   wrap.innerHTML = `
     <div class="waiting-illustration">
       <div class="emoji">💌</div>
-      <h3 style="margin:14px 0 6px;font-size:18px;">Your answer is locked in.</h3>
+      <h3 style="margin:14px 0 6px;font-size:18px;">Waiting on ${partner ? escapeHtml(partner.name) : 'your partner'}.</h3>
       <p class="text-muted" style="font-size:14px;line-height:1.5;">
-        ${partner ? escapeHtml(partner.name) : 'Your partner'} hasn't answered yet.
         We'll reveal both answers the moment you're both finished — no rush.
+        Here's what you answered:
       </p>
     </div>
   `;
+
+  // Your own answer is never hidden from you - only the partner's stays
+  // withheld pre-reveal (serialize_activity omits partner_submission
+  // from the response entirely until both have submitted, so there's
+  // nothing here that could leak it even by accident).
+  wrap.appendChild(submissionCard(me, data.my_submission, true));
+
   return wrap;
 }
 
