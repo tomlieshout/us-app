@@ -63,7 +63,11 @@ def pick_challenge_for_couple(couple, category=None, spicy_unlocked_flag=False):
     query = ActivityContent.query.filter_by(activity_type="challenge", active=True)
     if category:
         query = query.filter_by(category=category)
-    elif not spicy_unlocked_flag:
+    else:
+        # "All" tab: Spicy is excluded unconditionally here, even once
+        # unlocked - same deliberate divergence as list_challenges() below.
+        # Only an explicit category="spicy" pick (the dedicated Spicy tab)
+        # ever surfaces it.
         query = query.filter(db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy"))
     candidates = query.all()
     if not candidates:
