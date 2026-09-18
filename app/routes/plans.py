@@ -5,6 +5,7 @@ from flask_login import current_user, login_required
 
 from app.extensions import db
 from app.models import Plan
+from app.services.notifications import notify_plan_added, notify_shared_match
 
 plans_bp = Blueprint("plans", __name__)
 
@@ -154,6 +155,28 @@ def create_plan():
     )
     db.session.add(plan)
     db.session.commit()
+
+    if not plan.is_private:
+        notify_plan_added(plan)
+        # A fresh match forms iff a non-private plan with the same
+        # (category, title_key) already exists, added by the OTHER
+        # partner - excludes the couple's own earlier additions, same
+        # "duplicate additions never count as a match" rule as
+        # _matched_plan_ids above.
+        already_matched = (
+            Plan.query.filter_by(
+                couple_id=current_user.couple_id,
+                category=plan.category,
+                title_key=plan.title_key,
+                is_private=False,
+            )
+            .filter(Plan.added_by_id != current_user.id, Plan.id != plan.id)
+            .first()
+            is not None
+        )
+        if already_matched:
+            notify_shared_match(current_user.couple, plan.title)
+
     return jsonify(_serialize(plan)), 201
 
 

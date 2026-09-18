@@ -146,6 +146,12 @@ export const api = {
   // from the systems above. See app/routes/home.py.
   home: () => request('GET', '/api/home'),
 
+  // Notifications - see app/routes/notifications.py.
+  notifications: {
+    list: () => request('GET', '/api/notifications'),
+    markSeen: () => request('POST', '/api/notifications/seen'),
+  },
+
   // Settings
   updateProfile: (data) => request('PATCH', '/api/settings/profile', data),
   changePassword: (data) => request('POST', '/api/settings/password', data),

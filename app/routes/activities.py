@@ -32,6 +32,8 @@ from app.services.activity_questions import (
     get_or_create_daily_activity,
 )
 from app.services.privacy import spicy_unlocked
+from app.services.notifications import notify_game_answered, notify_game_ready, notify_new_champion
+from app.services.stats import compute_competitive_stats
 
 activities_bp = Blueprint("activities", __name__)
 
@@ -269,9 +271,29 @@ def submit_activity(activity_id):
     except ActivityValidationError as e:
         return jsonify({"error": "validation", "message": str(e)}), 400
 
+    champion_before = compute_competitive_stats(activity.couple)["leader"]
+
     # Attempting reveal after every submission is a no-op (returns None,
     # changes nothing) unless this submission was the one that completed
     # the activity - identical timing to the legacy submit_answer route.
-    handler.reveal(activity)
+    result = handler.reveal(activity)
+
+    if result is not None:
+        # A duplicate submission is rejected above, so every request that
+        # reaches this point came from a user who hadn't submitted yet -
+        # a non-None result here always means THIS submission was the one
+        # that completed the pair, not a later no-op reveal() call.
+        notify_game_ready(activity)
+        if result.is_competitive:
+            champion_after = compute_competitive_stats(activity.couple)["leader"]
+            if champion_after is not None and champion_after.get("user_id") != (champion_before or {}).get(
+                "user_id"
+            ):
+                notify_new_champion(activity.couple, champion_after["name"])
+    else:
+        # Still not complete - nudge whoever hasn't submitted yet.
+        waiting_on = activity.couple.other_member(current_user)
+        if waiting_on is not None:
+            notify_game_answered(activity, waiting_on)
 
     return jsonify(serialize_activity(activity, current_user)), 201

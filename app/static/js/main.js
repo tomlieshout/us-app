@@ -10,6 +10,7 @@ import { renderPlans } from './views/plans.js';
 import { renderHistory } from './views/history.js';
 import { renderStats } from './views/stats.js';
 import { renderSettings } from './views/settings.js';
+import { openNotificationsPanel, refreshNotificationBadge } from './views/notifications.js';
 
 const VIEWS = {
   home: renderHome,
@@ -57,6 +58,7 @@ function showAppShell() {
   renderTopbar();
   wireNav();
   switchView('home');
+  refreshNotificationBadge();
 }
 
 function renderTopbar() {
@@ -73,6 +75,7 @@ function wireNav() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
   document.getElementById('topbar-settings-btn').addEventListener('click', () => switchView('settings'));
+  document.getElementById('topbar-notifications-btn').addEventListener('click', () => openNotificationsPanel());
 }
 
 function switchView(viewName) {
@@ -87,6 +90,7 @@ function switchView(viewName) {
   const renderFn = VIEWS[viewName];
   const container = document.getElementById(`view-${viewName}`);
   if (renderFn) renderFn(container);
+  refreshNotificationBadge();
 }
 
 // Re-render the current view when returning to the tab/app, so a daily

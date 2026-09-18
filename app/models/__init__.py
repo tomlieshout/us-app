@@ -19,6 +19,7 @@ from app.models.challenge import CoupleChallenge
 from app.models.appreciation import Appreciation
 from app.models.memory import Memory
 from app.models.plan import Plan
+from app.models.notification import Notification
 
 __all__ = [
     "Couple",
@@ -42,4 +43,5 @@ __all__ = [
     "Appreciation",
     "Memory",
     "Plan",
+    "Notification",
 ]

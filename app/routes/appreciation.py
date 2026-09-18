@@ -16,6 +16,7 @@ from app.services.appreciation import (
     toggle_keep,
     unseen_count,
 )
+from app.services.notifications import notify_appreciation_received
 
 appreciation_bp = Blueprint("appreciation", __name__)
 
@@ -28,6 +29,7 @@ def send():
         appreciation = send_appreciation(current_user.couple, current_user, data.get("message_text"))
     except AppreciationError as e:
         return jsonify({"error": "validation", "message": str(e)}), 400
+    notify_appreciation_received(appreciation)
     return jsonify(serialize_appreciation(appreciation, current_user)), 201
 
 
