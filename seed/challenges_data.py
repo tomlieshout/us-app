@@ -93,3 +93,32 @@ CHALLENGES += [
     {"prompt": "Tell your partner exactly what you're about to do to them, step by step, right before you do it", "category": "spicy", "requires_both": False},
     {"prompt": "Send your partner a message right now describing exactly what you want to do to them tonight", "category": "spicy", "requires_both": False},
 ]
+
+# -------------------------------------------------- Spicy 🌶️ - Round Two
+# Checked against the 24 above for overlap. Pushes into new ground: edging
+# as an actual count, oral specifics, partner-directs-verbally, a fantasy
+# recreation, a randomiser mechanic, cross-referencing a WYR answer, and a
+# couple more filming/sensory variants. Still nothing requires buying
+# anything.
+CHALLENGES += [
+    {"prompt": "Edge your partner three times before letting them finish", "category": "spicy", "requires_both": True},
+    {"prompt": "Use your mouth until your partner finishes tonight - no hands", "category": "spicy", "requires_both": True},
+    {"prompt": "Skip every other kind of foreplay tonight and go straight for anal", "category": "spicy", "requires_both": True},
+    {"prompt": "Let your partner talk you through exactly what to do, step by step, for the whole round", "category": "spicy", "requires_both": True},
+    {"prompt": "Recreate the last fantasy your partner described to you, as closely as you can, tonight", "category": "spicy", "requires_both": True},
+    {"prompt": "Pick a toy at random from your drawer, no choosing - use whatever you grab", "category": "spicy", "requires_both": True},
+    {"prompt": "Keep a hand on the back of your partner's neck - holding, not choking - for the entire round", "category": "spicy", "requires_both": True},
+    {"prompt": "Talk your partner through a fantasy out loud while going down on them", "category": "spicy", "requires_both": True},
+    {"prompt": "Use ice on your partner for the first two minutes tonight - nothing else, just ice", "category": "spicy", "requires_both": True},
+    {"prompt": "Whisper something filthy in your partner's ear the second you're alone together tonight", "category": "spicy", "requires_both": False},
+    {"prompt": "Tease everywhere except where your partner wants it most for five minutes before giving in", "category": "spicy", "requires_both": True},
+    {"prompt": "Pick one answer from tonight's Would You Rather round and actually do it before bed", "category": "spicy", "requires_both": True},
+    {"prompt": "Record audio only - no video - for part of tonight", "category": "spicy", "requires_both": True},
+    {"prompt": "Have your partner direct you with words only, no touching from them, for 10 minutes", "category": "spicy", "requires_both": True},
+    {"prompt": "Use a mirror already in the house to watch yourselves for part of tonight", "category": "spicy", "requires_both": True},
+    {"prompt": "Go a full round with zero kissing - everything else is fair game", "category": "spicy", "requires_both": True},
+    {"prompt": "Whoever initiates first tonight gets to decide everything that happens", "category": "spicy", "requires_both": True},
+    {"prompt": "Go for a second round tonight instead of stopping after the first", "category": "spicy", "requires_both": True},
+    {"prompt": "Give your partner a hand job while keeping eye contact the entire time - no looking away", "category": "spicy", "requires_both": True},
+    {"prompt": "Go down on your partner first tonight, before anything else happens", "category": "spicy", "requires_both": True},
+]
