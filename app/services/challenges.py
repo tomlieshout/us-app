@@ -126,14 +126,34 @@ def complete_challenge(challenge, user):
     return challenge
 
 
-def list_challenges(couple, status=None, spicy_unlocked_flag=False):
+def list_challenges(couple, status=None, category=None, spicy_unlocked_flag=False):
+    """The couple's own accepted/in-progress/completed challenges.
+
+    category=None is the "All" tab. Spicy is deliberately excluded from
+    it unconditionally - unlike every other Spicy content type in this
+    app (Questions, Activities, Rounds), where Spicy behaves as a normal
+    category and appears in "All" once unlocked, Challenges never
+    surfaces Spicy outside the dedicated Spicy tab. That's a deliberate
+    divergence from the rest of the app's pattern, not an oversight -
+    see the "spicy tab only" requirement this was written for.
+
+    category="spicy" is the dedicated Spicy tab: requires unlocked,
+    same 403 pattern as every other spicy-gated endpoint. Any other
+    specific category filters normally - Spicy is irrelevant there.
+    """
     query = couple.challenges
     if status:
         query = query.filter_by(status=status)
-    if not spicy_unlocked_flag:
+
+    if category:
+        if category == "spicy" and not spicy_unlocked_flag:
+            raise SpicyLockedChallenge()
+        query = query.join(ActivityContent).filter(ActivityContent.category == category)
+    else:
         query = query.join(ActivityContent).filter(
             db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy")
         )
+
     return query.order_by(CoupleChallenge.accepted_at.desc()).all()
 
 

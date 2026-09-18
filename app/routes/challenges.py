@@ -61,9 +61,17 @@ def accept():
 @login_required
 def mine():
     status = request.args.get("status")
-    challenges = list_challenges(
-        current_user.couple, status=status, spicy_unlocked_flag=spicy_unlocked(current_user.couple)
-    )
+    category = request.args.get("category")
+    try:
+        challenges = list_challenges(
+            current_user.couple,
+            status=status,
+            category=category,
+            spicy_unlocked_flag=spicy_unlocked(current_user.couple),
+        )
+    except SpicyLockedChallenge:
+        return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
+
     return jsonify({"challenges": [serialize_challenge(c, current_user) for c in challenges]})
 
 
