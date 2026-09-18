@@ -141,7 +141,6 @@ CHALLENGES += [
     {"prompt": "Have sex in the car tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Have sex in the shower tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Have sex on the kitchen counter tonight", "category": "spicy", "requires_both": True},
-    {"prompt": "Have sex somewhere with the curtains open a crack", "category": "spicy", "requires_both": True},
     {"prompt": "Have rough sex then halfway, switch to gentle", "category": "spicy", "requires_both": True},
     {"prompt": "Blindfold your partner and explore with only your hands for ten minutes", "category": "spicy", "requires_both": True},
     {"prompt": "Give your partner a slow striptease before anything else happens", "category": "spicy", "requires_both": True},
