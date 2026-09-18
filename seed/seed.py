@@ -5,8 +5,12 @@ the new system (currently: would_you_rather, from seed/wyr_questions.py -
 there's no legacy equivalent to migrate for a game that never existed in
 the old system).
 
-Usage (from the project root, with your venv active):
+Usage (Windows, from the project root, with your venv active):
     python seed/seed.py
+
+Reads DATABASE_URL from your .env file automatically (same as run.py).
+Prints which database it's using every run, so it's never silently the
+wrong one.
 
 Safe to re-run: everything here matches on exact content before inserting,
 so it only ever adds what's missing. This is how you add new questions or
@@ -17,6 +21,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# A plain `python seed/seed.py` invocation doesn't pick up .env on its own -
+# only run.py did that before every script here started loading it too,
+# which made it easy to silently seed the wrong database.
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv()
 
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
@@ -182,6 +193,7 @@ def seed_challenges():
 
 def run():
     app = create_app(os.environ.get("FLASK_ENV", "development"))
+    print(f"Using database: {app.config['SQLALCHEMY_DATABASE_URI']}\n")
     with app.app_context():
         seed_legacy_questions()
         seed_would_you_rather()

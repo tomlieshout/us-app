@@ -23,12 +23,13 @@ violation) or leave that couple's already-accepted challenge pointing at
 nothing, depending on your database's FK enforcement - deactivating
 avoids that question entirely.
 
-Usage:
-    python3 scripts/deactivate_removed_challenges.py           # dry run - shows what WOULD change
-    python3 scripts/deactivate_removed_challenges.py --apply   # actually applies it
+Usage (Windows):
+    python scripts/deactivate_removed_challenges.py           # dry run - shows what WOULD change
+    python scripts/deactivate_removed_challenges.py --apply   # actually applies it
 
-Run with DATABASE_URL set to whatever your real app uses, same as any
-other one-off script here (see scripts/migrate_questions_to_activities.py).
+Reads DATABASE_URL from your .env file automatically (same as run.py) -
+no need to set it by hand unless you want to point at something other
+than what .env already says.
 """
 
 import argparse
@@ -36,6 +37,15 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# run.py (the app's actual entry point) loads .env before anything else
+# reads os.environ - a plain `python scripts/whatever.py` invocation
+# skips that entirely, so without this, DATABASE_URL silently falls back
+# to the local sqlite:///us.db default even when a real one is sitting
+# in .env right next to this script.
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from app import create_app
 from app.extensions import db
@@ -45,6 +55,12 @@ from seed.challenges_data import CHALLENGES
 
 def run(apply=False):
     app = create_app(os.environ.get("FLASK_ENV", "development"))
+    db_url = app.config["SQLALCHEMY_DATABASE_URI"]
+    # Printed every run, not just on request - silently hitting the
+    # wrong database is exactly the failure mode this script needs to
+    # make impossible to miss.
+    print(f"Using database: {db_url}\n")
+
     with app.app_context():
         current_prompts = {c["prompt"] for c in CHALLENGES}
         stale = (

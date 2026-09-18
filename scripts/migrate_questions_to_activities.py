@@ -8,12 +8,19 @@ payload["legacy_question_id"]).
 Safe to re-run - skips any Question that already has a matching
 ActivityContent, so running it twice won't create duplicates.
 
-Usage (make sure DATABASE_URL is set to whichever database you want to
-migrate - local dev or your real Supabase database - before running):
-
-    set DATABASE_URL=<your connection string>
+Usage (Windows):
     python scripts/migrate_questions_to_activities.py
+
+Reads DATABASE_URL from your .env file automatically (same as run.py) -
+a plain `python scripts/...` invocation does NOT pick up .env on its own,
+only run.py did that before this script started loading it too, which
+made it easy to silently run against the wrong database. Prints which
+database it's using every run so that's never in question again.
 """
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from app import create_app
 from app.extensions import db
@@ -69,5 +76,6 @@ def migrate():
 
 if __name__ == "__main__":
     app = create_app()
+    print(f"Using database: {app.config['SQLALCHEMY_DATABASE_URI']}\n")
     with app.app_context():
         migrate()

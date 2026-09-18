@@ -29,6 +29,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# A plain `python scripts/...` invocation doesn't pick up .env on its own -
+# only run.py did that before every script here started loading it too,
+# which made it easy to silently run against the wrong database.
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv()
+
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import Activity, ActivityResult  # noqa: E402
@@ -71,6 +78,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     app = create_app(os.environ.get("FLASK_ENV", "development"))
+    print(f"Using database: {app.config['SQLALCHEMY_DATABASE_URI']}\n")
     with app.app_context():
         result = backfill()
         if args.dry_run:
