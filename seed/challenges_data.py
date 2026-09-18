@@ -75,10 +75,7 @@ CHALLENGES += [
     {"prompt": "Use whatever you already have on hand - a tie, a scarf, actual cuffs - to restrain your partner's wrists for the next round", "category": "spicy", "requires_both": True},
     {"prompt": "Blindfold your partner and don't let them touch you back for the next 10 minutes", "category": "spicy", "requires_both": True},
     {"prompt": "Tie your partner's wrists behind their back for the next round - whatever you've already got works", "category": "spicy", "requires_both": True},
-    {"prompt": "Restrain your partner and don't let them finish until they've asked at least three times", "category": "spicy", "requires_both": True},
     {"prompt": "Make the next round entirely rough from the start - no gentle build-up, straight into spanking and pace", "category": "spicy", "requires_both": True},
-    {"prompt": "Give your partner ten open-hand spanks before anything else starts tonight", "category": "spicy", "requires_both": True},
-    {"prompt": "Pull your partner's hair the next time you kiss, and don't stop until they ask", "category": "spicy", "requires_both": True},
     {"prompt": "Pin your partner's wrists above their head for the entire next round - no letting go", "category": "spicy", "requires_both": True},
     {"prompt": "Slap - not just spank - at least once tonight, wherever you'd already agreed is fair game", "category": "spicy", "requires_both": True},
     {"prompt": "Use whichever vibrator you already own on your partner for five straight minutes before anything else", "category": "spicy", "requires_both": True},
@@ -88,8 +85,6 @@ CHALLENGES += [
     {"prompt": "Take one photo of tonight together, then decide on the spot whether it stays or goes", "category": "spicy", "requires_both": True},
     {"prompt": "Have sex somewhere in the house you haven't yet - not the bedroom", "category": "spicy", "requires_both": True},
     {"prompt": "Go somewhere new tonight - a drive, a walk, anywhere you haven't been together - and have sex when you get there", "category": "spicy", "requires_both": False},
-    {"prompt": "Take control completely for the next 20 minutes - your partner doesn't get a say in anything that happens", "category": "spicy", "requires_both": True},
-    {"prompt": "Talk dirty out loud the entire time tonight - no going quiet", "category": "spicy", "requires_both": True},
 ]
 
 # -------------------------------------------------- Spicy 🌶️ - Round Two
@@ -101,8 +96,6 @@ CHALLENGES += [
 CHALLENGES += [
     {"prompt": "Edge your partner three times before letting them finish", "category": "spicy", "requires_both": True},
     {"prompt": "Use your mouth until your partner finishes tonight - no hands", "category": "spicy", "requires_both": True},
-    {"prompt": "Skip every other kind of foreplay tonight and go straight for anal", "category": "spicy", "requires_both": True},
-    {"prompt": "Recreate the last fantasy your partner described to you, as closely as you can, tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Pick a toy at random from your drawer, no choosing - use whatever you grab", "category": "spicy", "requires_both": True},
     {"prompt": "Keep a hand on the back of your partner's neck - holding, not choking - for the entire round", "category": "spicy", "requires_both": True},
     {"prompt": "Use ice on your tonight", "category": "spicy", "requires_both": True},
@@ -110,8 +103,7 @@ CHALLENGES += [
     {"prompt": "Pick one answer from tonight's Would You Rather round and actually do it before bed", "category": "spicy", "requires_both": True},
     {"prompt": "Use a mirror already in the house to watch yourselves for part of tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Go a full round with zero kissing - everything else is fair game", "category": "spicy", "requires_both": True},
-    {"prompt": "Go for a second round tonight instead of stopping after the first", "category": "spicy", "requires_both": True},
-    {"prompt": "Give your partner a hand job while keeping eye contact the entire time - no looking away", "category": "spicy", "requires_both": True},
+    {"prompt": "Go for a multiple rounds tonight", "category": "spicy", "requires_both": True},
 ]
 
 # ------------------------------------------------ Spicy 🌶️ - Round Three
@@ -130,7 +122,7 @@ CHALLENGES += [
     {"prompt": "Only touch each other with your hands for fifteen minutes - no kissing, no more", "category": "spicy", "requires_both": True},
     {"prompt": "Make out for 20 minutes before any clothes come off", "category": "spicy", "requires_both": True},
     {"prompt": "Kiss everywhere except the lips for ten minutes", "category": "spicy", "requires_both": True},
-    {"prompt": "Do anal tonight - no discussion beforehand, just do it", "category": "spicy", "requires_both": True},
+    {"prompt": "Do anal tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Anal for the entire round, no switching to anything else", "category": "spicy", "requires_both": True},
     {"prompt": "Ten minutes of anal prep before anything else happens", "category": "spicy", "requires_both": True},
     {"prompt": "Have anal with a plug that's already been in since earlier in the day", "category": "spicy", "requires_both": True},
