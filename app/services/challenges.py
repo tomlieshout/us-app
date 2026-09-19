@@ -10,7 +10,7 @@ from datetime import datetime
 
 from app.extensions import db
 from app.models import ActivityContent, CoupleChallenge, CoupleChallengeCycle
-from app.models.challenge import CHALLENGE_CATEGORIES
+from app.models.challenge import CHALLENGE_CATEGORIES, SPICY_GATED_CATEGORIES
 
 
 class ChallengeError(Exception):
@@ -39,6 +39,15 @@ class ChallengeCategoryExhausted(Exception):
     here" message."""
 
 
+def requires_spicy_unlock(category):
+    """True if this category is gated behind the couple's dual Spicy
+    opt-in - currently "spicy" itself and "longdistance" (equally
+    explicit, just usable while apart). Centralised here so every
+    gating check - accept, skip, list, pick, status - stays in sync if
+    another gated category is ever added."""
+    return category in SPICY_GATED_CATEGORIES
+
+
 def get_owned_challenge(challenge_id, user):
     challenge = CoupleChallenge.query.get(challenge_id)
     if challenge is None or challenge.couple_id != user.couple_id:
@@ -47,12 +56,13 @@ def get_owned_challenge(challenge_id, user):
 
 
 def is_hidden_spicy_challenge(challenge, spicy_unlocked_flag):
-    """True if this challenge's content is Spicy and the couple currently
-    has Spicy locked - same policy as everywhere else in the app: treat
-    it as if it doesn't exist, even via a challenge_id the user already
-    has (a private item's status changing is itself a signal, so
-    mutation needs the same protection as reads)."""
-    return challenge.content.category == "spicy" and not spicy_unlocked_flag
+    """True if this challenge's content is in a Spicy-gated category
+    (Spicy or Long Distance) and the couple currently has Spicy locked -
+    same policy as everywhere else in the app: treat it as if it doesn't
+    exist, even via a challenge_id the user already has (a private
+    item's status changing is itself a signal, so mutation needs the
+    same protection as reads)."""
+    return requires_spicy_unlock(challenge.content.category) and not spicy_unlocked_flag
 
 
 def current_cycle_for_category(couple, category):
@@ -104,10 +114,15 @@ def pick_challenge_for_couple(couple, category=None, spicy_unlocked_flag=False):
     if category:
         query = query.filter_by(category=category)
     else:
-        # "All": Spicy excluded unconditionally, even once unlocked - only
-        # an explicit category="spicy" pick (the dedicated Spicy tab)
-        # ever surfaces it.
-        query = query.filter(db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy"))
+        # "All": every Spicy-gated category excluded unconditionally, even
+        # once unlocked - only an explicit gated-category pick (its own
+        # dedicated tab) ever surfaces it.
+        query = query.filter(
+            db.or_(
+                ActivityContent.category.is_(None),
+                ActivityContent.category.notin_(SPICY_GATED_CATEGORIES),
+            )
+        )
     candidates = query.all()
     if not candidates:
         return None
@@ -168,7 +183,7 @@ def accept_challenge(couple, content_id, spicy_unlocked_flag=False):
     content = ActivityContent.query.get(content_id)
     if content is None or content.activity_type != "challenge" or not content.active:
         raise ChallengeError("That challenge isn't available.")
-    if content.category == "spicy" and not spicy_unlocked_flag:
+    if requires_spicy_unlock(content.category) and not spicy_unlocked_flag:
         raise SpicyLockedChallenge()
 
     cycle = current_cycle_for_category(couple, content.category)
@@ -201,7 +216,7 @@ def skip_challenge(couple, content_id, spicy_unlocked_flag=False):
     content = ActivityContent.query.get(content_id)
     if content is None or content.activity_type != "challenge" or not content.active:
         raise ChallengeError("That challenge isn't available.")
-    if content.category == "spicy" and not spicy_unlocked_flag:
+    if requires_spicy_unlock(content.category) and not spicy_unlocked_flag:
         raise SpicyLockedChallenge()
 
     cycle = current_cycle_for_category(couple, content.category)
@@ -267,12 +282,15 @@ def list_challenges(couple, status=None, category=None, spicy_unlocked_flag=Fals
         query = query.filter_by(status=status)
 
     if category:
-        if category == "spicy" and not spicy_unlocked_flag:
+        if requires_spicy_unlock(category) and not spicy_unlocked_flag:
             raise SpicyLockedChallenge()
         query = query.join(ActivityContent).filter(ActivityContent.category == category)
     else:
         query = query.join(ActivityContent).filter(
-            db.or_(ActivityContent.category.is_(None), ActivityContent.category != "spicy")
+            db.or_(
+                ActivityContent.category.is_(None),
+                ActivityContent.category.notin_(SPICY_GATED_CATEGORIES),
+            )
         )
 
     return query.order_by(CoupleChallenge.accepted_at.desc()).all()

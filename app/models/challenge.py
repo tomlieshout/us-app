@@ -33,7 +33,14 @@ from datetime import datetime
 
 from app.extensions import db
 
-CHALLENGE_CATEGORIES = ["cute", "funny", "deep", "romantic", "spicy"]
+CHALLENGE_CATEGORIES = ["cute", "funny", "deep", "romantic", "spicy", "longdistance"]
+
+# Categories gated behind the couple's dual Spicy opt-in, and excluded
+# from the unfiltered "All" tab the same way. Long Distance content is
+# just as explicit as regular Spicy - it's simply usable while apart -
+# so it gets identical gating under its own tab rather than being folded
+# into "spicy" or left ungated.
+SPICY_GATED_CATEGORIES = {"spicy", "longdistance"}
 
 
 class CoupleChallenge(db.Model):

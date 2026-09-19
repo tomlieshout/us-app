@@ -15,6 +15,7 @@ from app.services.challenges import (
     list_challenges,
     pick_challenge_for_couple,
     replay_category,
+    requires_spicy_unlock,
     serialize_challenge,
     skip_challenge,
 )
@@ -28,7 +29,7 @@ challenges_bp = Blueprint("challenges", __name__)
 def random_challenge():
     category = request.args.get("category")
     unlocked = spicy_unlocked(current_user.couple)
-    if category == "spicy" and not unlocked:
+    if requires_spicy_unlock(category) and not unlocked:
         return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
 
     try:
@@ -58,7 +59,7 @@ def status():
         return jsonify({"error": "validation", "message": "category is required."}), 400
 
     unlocked = spicy_unlocked(current_user.couple)
-    if category == "spicy" and not unlocked:
+    if requires_spicy_unlock(category) and not unlocked:
         return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
 
     return jsonify({
@@ -75,7 +76,7 @@ def replay():
     category = data.get("category")
     if not category:
         return jsonify({"error": "validation", "message": "category is required."}), 400
-    if category == "spicy" and not spicy_unlocked(current_user.couple):
+    if requires_spicy_unlock(category) and not spicy_unlocked(current_user.couple):
         return jsonify({"error": "spicy_locked", "message": "Both partners need to opt in first."}), 403
 
     try:

@@ -16,7 +16,9 @@ export function openChallengesMenu() {
 }
 
 function categoryChips(body, activeCategory) {
-  const categories = isSpicyUnlocked() ? [...CATEGORIES, { key: 'spicy', label: 'Spicy', emoji: '🔥' }] : CATEGORIES;
+  const categories = isSpicyUnlocked()
+    ? [...CATEGORIES, { key: 'spicy', label: 'Spicy', emoji: '🔥' }, { key: 'longdistance', label: 'Long Distance', emoji: '📱' }]
+    : CATEGORIES;
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:14px;';
   categories.forEach((c) => {
