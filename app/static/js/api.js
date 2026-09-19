@@ -183,8 +183,17 @@ export const api = {
   // Challenges
   challenges: {
     random: (category) => request('GET', `/api/challenges/random${category ? `?category=${encodeURIComponent(category)}` : ''}`),
+    status: (category) => request('GET', `/api/challenges/status?category=${encodeURIComponent(category)}`),
+    replay: (category) => request('POST', '/api/challenges/replay', { category }),
     accept: (content_id) => request('POST', '/api/challenges/accept', { content_id }),
-    mine: (status) => request('GET', `/api/challenges/mine${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+    skip: (content_id) => request('POST', '/api/challenges/skip', { content_id }),
+    mine: (status, category) => {
+      const params = new URLSearchParams();
+      if (status) params.set('status', status);
+      if (category) params.set('category', category);
+      const qs = params.toString();
+      return request('GET', `/api/challenges/mine${qs ? `?${qs}` : ''}`);
+    },
     complete: (id) => request('POST', `/api/challenges/${id}/complete`),
   },
 
