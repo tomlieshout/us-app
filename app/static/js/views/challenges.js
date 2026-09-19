@@ -50,6 +50,25 @@ async function renderBrowse(body, category) {
 
 async function loadCandidate(cardHolder, category, body) {
   cardHolder.innerHTML = '<div class="skeleton" style="height:160px;"></div>';
+
+  // The "All" tab (category === null) pulls from several categories at
+  // once, so there's no single well-defined "exhausted" state for it -
+  // only per-category tabs support checking/replaying.
+  if (category) {
+    let statusData = null;
+    try {
+      statusData = await api.challenges.status(category);
+    } catch (err) {
+      // If the status check itself fails (e.g. spicy locked), fall
+      // through to the normal random call below, which already surfaces
+      // that error the usual way.
+    }
+    if (statusData && statusData.exhausted) {
+      renderExhausted(cardHolder, category, body);
+      return;
+    }
+  }
+
   let content;
   try {
     content = await api.challenges.random(category);
@@ -71,7 +90,16 @@ async function loadCandidate(cardHolder, category, body) {
   `;
   cardHolder.appendChild(card);
 
-  card.querySelector('#ch-skip').addEventListener('click', () => loadCandidate(cardHolder, category, body));
+  card.querySelector('#ch-skip').addEventListener('click', async () => {
+    const skipBtn = card.querySelector('#ch-skip');
+    skipBtn.disabled = true;
+    try {
+      await api.challenges.skip(content.id);
+    } catch (err) {
+      showToast(err.message);
+    }
+    loadCandidate(cardHolder, category, body);
+  });
   card.querySelector('#ch-accept').addEventListener('click', async () => {
     try {
       await api.challenges.accept(content.id);
@@ -79,6 +107,32 @@ async function loadCandidate(cardHolder, category, body) {
       renderMine(body);
     } catch (err) {
       showToast(err.message);
+    }
+  });
+}
+
+function renderExhausted(cardHolder, category, body) {
+  cardHolder.innerHTML = '';
+  const label = category.charAt(0).toUpperCase() + category.slice(1);
+  const card = document.createElement('div');
+  card.className = 'card hero-card';
+  card.innerHTML = `
+    <div class="hero-eyebrow">${label}</div>
+    <div class="hero-question">You've been through every ${label} challenge 🎉</div>
+    <button class="btn btn-block" id="ch-replay" style="background:#fff;color:var(--accent-strong);">Replay ${label} challenges</button>
+  `;
+  cardHolder.appendChild(card);
+
+  card.querySelector('#ch-replay').addEventListener('click', async () => {
+    const replayBtn = card.querySelector('#ch-replay');
+    replayBtn.disabled = true;
+    try {
+      await api.challenges.replay(category);
+      showToast(`Replaying ${label} 🔁`);
+      loadCandidate(cardHolder, category, body);
+    } catch (err) {
+      showToast(err.message);
+      replayBtn.disabled = false;
     }
   });
 }
