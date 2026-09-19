@@ -94,7 +94,7 @@ CHALLENGES += [
 # anything.
 CHALLENGES += [
     {"prompt": "Edge your partner three times before letting them finish", "category": "spicy", "requires_both": True},
-    {"prompt": "Suckc your partners dick until they finish tonight - no hands", "category": "spicy", "requires_both": True},
+    {"prompt": "Suck your partners dick until they finish tonight - no hands", "category": "spicy", "requires_both": True},
     {"prompt": "Eat your partner out until they finish tonight - no hands", "category": "spicy", "requires_both": True},
     {"prompt": "Pick a toy at random from your drawer, no choosing - use whatever you grab", "category": "spicy", "requires_both": True},
     {"prompt": "Keep a hand on the back of your partner's neck - holding, not choking - for the entire round", "category": "spicy", "requires_both": True},
