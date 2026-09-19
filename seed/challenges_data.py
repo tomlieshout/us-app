@@ -68,7 +68,7 @@ CHALLENGES += [
 # have. "Going somewhere new" (a drive, a different room) is fine and used
 # a couple of times - that's not a purchase, just a change of scene.
 CHALLENGES += [
-    {"prompt": "Have anal sex tonight and let your partner set the entire pace - you don't take control back once it starts", "category": "spicy", "requires_both": True},
+    {"prompt": "Have anal sex tonight after wearing a butt plug", "category": "spicy", "requires_both": True},
     {"prompt": "Spend five minutes on rimming (oral) before anything else happens tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Wear a butt plug for the next hour while you carry on with whatever's already planned tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Spend longer on anal prep than you normally would - fingers only, no rushing to the main event", "category": "spicy", "requires_both": True},
@@ -94,10 +94,11 @@ CHALLENGES += [
 # anything.
 CHALLENGES += [
     {"prompt": "Edge your partner three times before letting them finish", "category": "spicy", "requires_both": True},
-    {"prompt": "Use your mouth until your partner finishes tonight - no hands", "category": "spicy", "requires_both": True},
+    {"prompt": "Suckc your partners dick until they finish tonight - no hands", "category": "spicy", "requires_both": True},
+    {"prompt": "Eat your partner out until they finish tonight - no hands", "category": "spicy", "requires_both": True},
     {"prompt": "Pick a toy at random from your drawer, no choosing - use whatever you grab", "category": "spicy", "requires_both": True},
     {"prompt": "Keep a hand on the back of your partner's neck - holding, not choking - for the entire round", "category": "spicy", "requires_both": True},
-    {"prompt": "Use ice on your tonight", "category": "spicy", "requires_both": True},
+    {"prompt": "Use ice on your partner tonight", "category": "spicy", "requires_both": True},
     {"prompt": "Tease everywhere except where your partner wants it most for five minutes before giving in", "category": "spicy", "requires_both": True},
     {"prompt": "Pick one answer from tonight's Would You Rather round and actually do it before bed", "category": "spicy", "requires_both": True},
     {"prompt": "Use a mirror already in the house to watch yourselves for part of tonight", "category": "spicy", "requires_both": True},
@@ -114,7 +115,7 @@ CHALLENGES += [
 CHALLENGES += [
     {"prompt": "Take turns - five minutes of oral each, switch when the timer's up", "category": "spicy", "requires_both": True},
     {"prompt": "69 for ten minutes straight, no separate turns", "category": "spicy", "requires_both": True},
-    {"prompt": "No hands for the first ten minutes tonight - mouths only", "category": "spicy", "requires_both": True},
+    {"prompt": "No hands for the first ten minutes toFnight - mouths only", "category": "spicy", "requires_both": True},
     {"prompt": "Only kiss for ten minutes tonight - nothing else allowed", "category": "spicy", "requires_both": True},
     {"prompt": "Only touch each other with your hands for fifteen minutes - no kissing, no more", "category": "spicy", "requires_both": True},
     {"prompt": "Make out for 20 minutes before any clothes come off", "category": "spicy", "requires_both": True},
