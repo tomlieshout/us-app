@@ -228,7 +228,13 @@ def test_challenges_unfiltered_random_never_surfaces_spicy_while_locked(app, cou
             assert resp.get_json()["category"] != "spicy"
 
 
-def test_challenges_mine_hides_spicy_while_locked_shows_once_unlocked(app, couple):
+def test_challenges_mine_spicy_only_via_explicit_category_filter(app, couple):
+    """Challenges deliberately diverges from the rest of the app here:
+    unlike Questions/Activities (where Spicy behaves as a normal category
+    in unfiltered "All" once unlocked), Challenges NEVER surfaces Spicy in
+    the unfiltered /mine list, regardless of lock state - only the
+    explicit category="spicy" filter (the dedicated Spicy tab) ever shows
+    it, and that still requires unlocked. See list_challenges' docstring."""
     tom, sarah = couple["tom"], couple["sarah"]
     content_id = _create_content(app, "challenge", "spicy", {"requires_both": False})
     tom.post("/api/settings/spicy", json={"enabled": True, "adult_confirmation": True})
@@ -237,16 +243,20 @@ def test_challenges_mine_hides_spicy_while_locked_shows_once_unlocked(app, coupl
     accepted = tom.post("/api/challenges/accept", json={"content_id": content_id}).get_json()
     challenge_id = accepted["id"]
 
-    mine = tom.get("/api/challenges/mine").get_json()["challenges"]
-    assert any(c["id"] == challenge_id for c in mine)
-
-    sarah.post("/api/settings/spicy", json={"enabled": False})
+    # Unfiltered "mine" never includes it, unlocked or not.
     mine = tom.get("/api/challenges/mine").get_json()["challenges"]
     assert not any(c["id"] == challenge_id for c in mine)
 
-    sarah.post("/api/settings/spicy", json={"enabled": True, "adult_confirmation": True})
-    mine = tom.get("/api/challenges/mine").get_json()["challenges"]
-    assert any(c["id"] == challenge_id for c in mine)
+    # The explicit Spicy-tab filter does show it, while unlocked...
+    mine_spicy = tom.get("/api/challenges/mine?category=spicy").get_json()["challenges"]
+    assert any(c["id"] == challenge_id for c in mine_spicy)
+
+    # ...and correctly 403s once locked again, same as every other
+    # spicy-gated endpoint.
+    sarah.post("/api/settings/spicy", json={"enabled": False})
+    resp = tom.get("/api/challenges/mine?category=spicy")
+    assert resp.status_code == 403
+    assert resp.get_json()["error"] == "spicy_locked"
 
 
 def test_challenges_complete_blocked_if_relocked_after_accept(app, couple):
