@@ -185,7 +185,6 @@ CHALLENGES += [
     {"prompt": "Tell your partner exactly when to expect a photo today, then actually send it right on time", "category": "longdistance", "requires_both": False},
     {"prompt": "Set a timer and masturbate for exactly 10 minutes without finishing, then text your partner when the timer's up", "category": "longdistance", "requires_both": False},
     {"prompt": "Edge yourself three times over the course of an hour to your partners nudes", "category": "longdistance", "requires_both": False},
-    {"prompt": "Masturbate for exactly the length of one song, no more, no less", "category": "longdistance", "requires_both": False},
     {"prompt": "Masturbate to your partners nudes thinking about one specific memory, then tell your partner", "category": "longdistance", "requires_both": False},
     {"prompt": "Masturbate at a specific time your partner picks earlier in the day, then confirm by text afterward", "category": "longdistance", "requires_both": True},
 ]
